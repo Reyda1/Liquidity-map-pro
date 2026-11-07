@@ -692,12 +692,47 @@ if barstate.islast and na(liquidity.processed)
 var array<line> drawnLines = array.new<line>()
 var array<label> drawnLabels = array.new<label>()
 
+// Nur Zeichenkoordinaten: tatsächliche H1-Intervalle inklusive Session-Versatz.
+var array<int> drawH1Opens = array.new_int()
+var array<int> drawH1Closes = array.new_int()
+if chartSeconds == 3600
+    array.push(drawH1Opens, time)
+    array.push(drawH1Closes, time_close)
+
+f_h1DrawTime(int exactTime) =>
+    int drawTime = exactTime
+    if chartSeconds == 3600
+        int left = 0
+        int right = array.size(drawH1Opens) - 1
+        int containing = -1
+        while left <= right
+            int middle = int(math.floor((left + right) / 2))
+            if array.get(drawH1Opens, middle) <= exactTime
+                containing := middle
+                left := middle + 1
+            else
+                right := middle - 1
+        if containing >= 0
+            if exactTime < array.get(drawH1Closes, containing)
+                drawTime := array.get(drawH1Opens, containing)
+    drawTime
+
 f_drawLevel(LiquidityLevel level, int asOf, bool latest) =>
     bool active = na(level.sweptAt)
     color base = f_mirrorColor(level.code)
     color tint = active or latest ? base : colSwept
     int endTime = active ? asOf : level.sweptAt
-    line ln = line.new(level.start, level.price, endTime, level.price,
+    int drawStart = level.start
+    int drawEnd = f_h1DrawTime(endTime)
+    if chartSeconds == 3600
+        // origins enthält auch nach Upgrades die H1-Ursprünge aller Quellen.
+        // Der zum exakten Start gehörende Ursprung kann vor der Charthistorie liegen.
+        int originHour = na
+        for origin in level.origins
+            if origin <= level.start and (na(originHour) or origin > originHour)
+                originHour := origin
+        drawStart := na(originHour) ? f_h1DrawTime(level.start) : originHour
+    line ln = line.new(drawStart, level.price, drawEnd, level.price,
         xloc=xloc.bar_time, extend=active ? extend.right : extend.none,
         color=tint, style=active or latest ? line.style_solid : line.style_dashed,
         width=f_mirrorPriority(level.code) >= 4 ? 2 : 1)
