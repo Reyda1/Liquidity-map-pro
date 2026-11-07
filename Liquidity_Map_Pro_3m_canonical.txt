@@ -2,6 +2,7 @@
 indicator(
      "Liquidity Map Pro",
      overlay=true,
+     dynamic_requests=true,
      max_lines_count=500,
      max_labels_count=500)
 max_bars_back(time, 1000)
@@ -193,34 +194,6 @@ f_getLabelSize(string s) =>
 labelSizeValue = f_getLabelSize(labelSizeInput)
 
 
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 3. LEVEL-SPEICHER
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-var levelPrice = array.new_float()
-var levelHigh = array.new_bool()
-var levelActive = array.new_bool()
-var levelSource = array.new_string()
-var levelPriority = array.new_int()
-var levelWasSwing = array.new_bool()
-var levelCreatedTime = array.new_int()
-
-var levelLine = array.new_line()
-var levelLabel = array.new_label()
-
-var line lastSweptSwingLine = na
-var label lastSweptSwingLabel = na
-var int lastSweptSwingTime = na
-var float lastSweptSwingPrice = na
-var bool lastSweptSwingIsHigh = false
-
-
-
-
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 4. HILFSFUNKTIONEN
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 f_samePrice(float a, float b) =>
     not na(a) and
      not na(b) and
@@ -249,457 +222,6 @@ f_keepNearest(
         array.pop(distArr)
 
     true
-
-f_hasLevelAtPrice(float price, bool isHigh) =>
-    bool found = false
-
-    if array.size(levelPrice) > 0
-        for i = 0 to array.size(levelPrice) - 1
-            if array.get(levelHigh, i) == isHigh and f_samePrice(array.get(levelPrice, i), price)
-                found := true
-                break
-
-    found
-
-f_nyPreviousDayState() =>
-    var float currentDayHigh = na
-    var float currentDayLow = na
-    var int currentDayHighTime = na
-    var int currentDayLowTime = na
-
-    var float pdh = na
-    var float pdl = na
-    var int pdhTime = na
-    var int pdlTime = na
-
-    var bool pdhSwept = false
-    var bool pdlSwept = false
-
-    var int pdhSweepTime = na
-    var int pdlSweepTime = na
-
-    int nyYear = year(time, "America/New_York")
-    int nyMonth = month(time, "America/New_York")
-    int nyDay = dayofmonth(time, "America/New_York")
-
-    bool newNyDay = nyDay != nyDay[1] or nyMonth != nyMonth[1] or nyYear != nyYear[1]
-
-    if na(currentDayHigh)
-        currentDayHigh := high
-        currentDayLow := low
-        currentDayHighTime := time
-        currentDayLowTime := time
-
-    else
-        if newNyDay
-            pdh := currentDayHigh
-            pdl := currentDayLow
-
-            pdhTime := currentDayHighTime
-            pdlTime := currentDayLowTime
-
-            pdhSwept := false
-            pdlSwept := false
-
-            pdhSweepTime := na
-            pdlSweepTime := na
-
-            currentDayHigh := high
-            currentDayLow := low
-            currentDayHighTime := time
-            currentDayLowTime := time
-
-        else
-            if high > currentDayHigh
-                currentDayHigh := high
-                currentDayHighTime := time
-
-            if low < currentDayLow
-                currentDayLow := low
-                currentDayLowTime := time
-
-    if not na(pdh) and not pdhSwept
-        bool hitPDH = sweepByWick ? high >= pdh + syminfo.mintick : close >= pdh + syminfo.mintick
-
-        if hitPDH
-            pdhSwept := true
-            pdhSweepTime := time
-
-    if not na(pdl) and not pdlSwept
-        bool hitPDL = sweepByWick ? low <= pdl - syminfo.mintick : close <= pdl - syminfo.mintick
-
-        if hitPDL
-            pdlSwept := true
-            pdlSweepTime := time
-
-    [
-        pdh,
-        pdl,
-        pdhTime,
-        pdlTime,
-        pdhSwept,
-        pdlSwept,
-        pdhSweepTime,
-        pdlSweepTime
-    ]
-
-f_nyPmState() =>
-    var float pmHigh = na
-    var float pmLow = na
-    var int pmHighTime = na
-    var int pmLowTime = na
-
-    var bool pmHighSwept = false
-    var bool pmLowSwept = false
-
-    var int pmHighSweepTime = na
-    var int pmLowSweepTime = na
-
-    int nyHour = hour(time, "America/New_York")
-    int nyMinute = minute(time, "America/New_York")
-
-    int nyMinutes = nyHour * 60 + nyMinute
-
-    bool inPm = nyMinutes >= 13 * 60 and nyMinutes < 17 * 60
-    bool pmStarts = inPm and not inPm[1]
-    bool pmEnds = not inPm and inPm[1]
-
-    if pmStarts
-        pmHigh := high
-        pmLow := low
-        pmHighTime := time
-        pmLowTime := time
-
-        pmHighSwept := false
-        pmLowSwept := false
-
-        pmHighSweepTime := na
-        pmLowSweepTime := na
-
-    else if inPm
-        if high > pmHigh
-            pmHigh := high
-            pmHighTime := time
-
-        if low < pmLow
-            pmLow := low
-            pmLowTime := time
-
-    // Erst NACH Ende der PM-Session auf Sweep prüfen
-    if not inPm and not na(pmHigh) and not pmHighSwept
-        bool hitHigh = sweepByWick ? high >= pmHigh + syminfo.mintick : close >= pmHigh + syminfo.mintick
-
-        if hitHigh
-            pmHighSwept := true
-            pmHighSweepTime := time
-
-    if not inPm and not na(pmLow) and not pmLowSwept
-        bool hitLow = sweepByWick ? low <= pmLow - syminfo.mintick : close <= pmLow - syminfo.mintick
-
-        if hitLow
-            pmLowSwept := true
-            pmLowSweepTime := time
-
-    [
-        pmHigh,
-        pmLow,
-        pmHighTime,
-        pmLowTime,
-        pmHighSwept,
-        pmLowSwept,
-        pmHighSweepTime,
-        pmLowSweepTime
-    ]
-
-f_nyAmState() =>
-    var float amHigh = na
-    var float amLow = na
-    var int amHighTime = na
-    var int amLowTime = na
-
-    var bool amHighSwept = false
-    var bool amLowSwept = false
-
-    var int amHighSweepTime = na
-    var int amLowSweepTime = na
-
-    int nyHour = hour(time, "America/New_York")
-    int nyMinute = minute(time, "America/New_York")
-    int nyMinutes = nyHour * 60 + nyMinute
-
-    bool inAm = nyMinutes >= 8 * 60 + 30 and nyMinutes < 12 * 60
-    bool amStarts = inAm and not inAm[1]
-
-    if amStarts
-        amHigh := high
-        amLow := low
-        amHighTime := time
-        amLowTime := time
-
-        amHighSwept := false
-        amLowSwept := false
-
-        amHighSweepTime := na
-        amLowSweepTime := na
-
-    else if inAm
-        if high > amHigh
-            amHigh := high
-            amHighTime := time
-
-        if low < amLow
-            amLow := low
-            amLowTime := time
-
-    // Erst nach Ende der NY-AM-Session sweepen
-    if not inAm and not na(amHigh) and not amHighSwept
-        bool hitHigh = sweepByWick ? high >= amHigh + syminfo.mintick : close >= amHigh + syminfo.mintick
-
-        if hitHigh
-            amHighSwept := true
-            amHighSweepTime := time
-
-    if not inAm and not na(amLow) and not amLowSwept
-        bool hitLow = sweepByWick ? low <= amLow - syminfo.mintick : close <= amLow - syminfo.mintick
-
-        if hitLow
-            amLowSwept := true
-            amLowSweepTime := time
-
-    [
-        amHigh,
-        amLow,
-        amHighTime,
-        amLowTime,
-        amHighSwept,
-        amLowSwept,
-        amHighSweepTime,
-        amLowSweepTime
-    ]
-
-// Priorität:
-// 1 = Swing
-// 2 = Spitz
-// 3 = Session
-// 4 = Day
-// 5 = Week
-
-f_addOrUpgradeLevel(
-     float price,
-     bool isHigh,
-     string source,
-     color levelColor,
-     int priority,
-     int startTime) =>
-
-    int existing = -1
-
-    bool alreadySweptSameLevel = false
-
-    if not na(price) and not na(startTime)
-
-        if array.size(levelPrice) > 0
-            for i = 0 to array.size(levelPrice) - 1
-
-                bool sameSide =
-                     array.get(levelHigh, i) == isHigh
-
-                bool samePrice =
-                     f_samePrice(
-                         array.get(levelPrice, i),
-                         price)
-
-                bool isActive = array.get(levelActive, i)
-                line existingLine = array.get(levelLine, i)
-                bool sameStart = line.get_x1(existingLine) == startTime
-
-                if sameSide and samePrice
-                    if isActive
-                        existing := i
-                        break
-                    else if sameStart
-                        alreadySweptSameLevel := true
-                        break
-
-
-        // EXISTIERENDES LEVEL
-        if existing >= 0
-
-            int oldPriority =
-                 array.get(levelPriority, existing)
-
-            array.set(levelWasSwing, existing, array.get(levelWasSwing, existing) or priority <= 2)
-
-            if priority > oldPriority
-
-                array.set(
-                     levelPrice,
-                     existing,
-                     price)
-
-                array.set(
-                     levelSource,
-                     existing,
-                     source)
-
-                array.set(
-                     levelPriority,
-                     existing,
-                     priority)
-
-                line ln =
-                     array.get(levelLine, existing)
-
-                label lbl =
-                     array.get(levelLabel, existing)
-
-                line.set_x1(
-                     ln,
-                     startTime)
-
-                line.set_y1(
-                     ln,
-                     price)
-
-                line.set_x2(
-                     ln,
-                     time)
-
-                line.set_y2(
-                     ln,
-                     price)
-
-                line.set_extend(
-                     ln,
-                     extend.right)
-
-                line.set_style(
-                     ln,
-                     line.style_solid)
-
-                line.set_color(
-                     ln,
-                     levelColor)
-
-                line.set_width(
-                     ln,
-                     priority >= 4 ? 2 : 1)
-
-                label.set_y(
-                     lbl,
-                     price)
-
-                label.set_text(
-                     lbl,
-                     source)
-
-                label.set_textcolor(
-                     lbl,
-                     levelColor)
-
-                label.set_style(
-                     lbl,
-                     label.style_none)
-
-                label.set_size(
-                     lbl,
-                     labelSizeValue)
-
-
-        // NEUES LEVEL
-        else if not alreadySweptSameLevel
-
-            line newLine = line.new(
-                 x1=startTime,
-                 y1=price,
-                 x2=time,
-                 y2=price,
-                 xloc=xloc.bar_time,
-                 extend=extend.right,
-                 color=levelColor,
-                 width=priority >= 4 ? 2 : 1)
-
-            label newLabel = label.new(
-                 x=startTime,
-                 y=price,
-                 text=source,
-                 xloc=xloc.bar_time,
-                 style=label.style_none,
-                 textcolor=levelColor,
-                 color=color.new(color.black, 100),
-                 size=labelSizeValue)
-
-            array.push(
-                 levelPrice,
-                 price)
-
-            array.push(
-                 levelHigh,
-                 isHigh)
-
-            array.push(
-                 levelActive,
-                 true)
-
-            array.push(
-                 levelSource,
-                 source)
-
-            array.push(
-                 levelPriority,
-                 priority)
-
-            array.push(levelWasSwing, priority <= 2)
-
-            array.push(
-                 levelLine,
-                 newLine)
-
-            array.push(
-                 levelLabel,
-                 newLabel)
-
-            array.push(levelCreatedTime, time)
-
-
-            // Speicher bereinigen:
-            // zuerst ein bereits gesweeptes/inaktives Level entfernen
-            if array.size(levelPrice) > maxLevels
-
-                int removeIndex = -1
-
-                for r = 0 to array.size(levelPrice) - 1
-                    if not array.get(levelActive, r)
-                        removeIndex := r
-                        break
-
-                if removeIndex >= 0
-
-                    line oldLine = array.get(levelLine, removeIndex)
-                    label oldLabel = array.get(levelLabel, removeIndex)
-
-                    line.delete(oldLine)
-                    label.delete(oldLabel)
-
-                    array.remove(levelPrice, removeIndex)
-                    array.remove(levelHigh, removeIndex)
-                    array.remove(levelActive, removeIndex)
-                    array.remove(levelSource, removeIndex)
-                    array.remove(levelPriority, removeIndex)
-                    array.remove(levelWasSwing, removeIndex)
-                    array.remove(levelLine, removeIndex)
-                    array.remove(levelLabel, removeIndex)
-                    array.remove(levelCreatedTime, removeIndex)
-
-        true
-
-
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 5. H1-SWINGS
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-swingTf = "60"
-sessionTf = "30"
 
 float sharpDistance =
      sharpTicks * syminfo.mintick
@@ -810,748 +332,6 @@ f_h1LowData() =>
         isSharp
     ]
 
-f_h1HistoricalLowSnapshot() =>
-    var array<float> histLowPrice = array.new_float()
-    var array<int> histLowTime = array.new_int()
-    var array<bool> histLowSharp = array.new_bool()
-
-    // Bereits gespeicherte H1-Lows auf Sweep prüfen.
-    int k = array.size(histLowPrice) - 1
-
-    while k >= 0
-        float storedPrice = array.get(histLowPrice, k)
-
-        bool broken = sweepByWick ?
-             low <= storedPrice - syminfo.mintick :
-             close <= storedPrice - syminfo.mintick
-
-        if broken
-            array.remove(histLowPrice, k)
-            array.remove(histLowTime, k)
-            array.remove(histLowSharp, k)
-
-        k -= 1
-
-    // Neuen bestätigten H1-Swing erkennen.
-    [lowSwing, lowPrice, lowTime, lowSharp] = f_h1LowData()
-
-    if lowSwing and not na(lowPrice) and not na(lowTime)
-
-        bool alreadyStored = false
-
-        if array.size(histLowTime) > 0
-            for n = 0 to array.size(histLowTime) - 1
-                if array.get(histLowTime, n) == lowTime
-                    alreadyStored := true
-                    break
-
-        if not alreadyStored
-            array.push(histLowPrice, lowPrice)
-            array.push(histLowTime, lowTime)
-            array.push(histLowSharp, lowSharp)
-
-    // Die drei nächsten noch offenen Lows bestimmen.
-    float p1 = na
-    float p2 = na
-    float p3 = na
-
-    int t1 = na
-    int t2 = na
-    int t3 = na
-
-    bool s1 = false
-    bool s2 = false
-    bool s3 = false
-
-    float d1 = na
-    float d2 = na
-    float d3 = na
-
-    if array.size(histLowPrice) > 0
-        for n = 0 to array.size(histLowPrice) - 1
-
-            float p = array.get(histLowPrice, n)
-
-            if p < close
-                float d = close - p
-                int t = array.get(histLowTime, n)
-                bool s = array.get(histLowSharp, n)
-
-                if na(d1) or d < d1
-                    d3 := d2
-                    p3 := p2
-                    t3 := t2
-                    s3 := s2
-
-                    d2 := d1
-                    p2 := p1
-                    t2 := t1
-                    s2 := s1
-
-                    d1 := d
-                    p1 := p
-                    t1 := t
-                    s1 := s
-
-                else if na(d2) or d < d2
-                    d3 := d2
-                    p3 := p2
-                    t3 := t2
-                    s3 := s2
-
-                    d2 := d
-                    p2 := p
-                    t2 := t
-                    s2 := s
-
-                else if na(d3) or d < d3
-                    d3 := d
-                    p3 := p
-                    t3 := t
-                    s3 := s
-
-    [p1, t1, s1, p2, t2, s2, p3, t3, s3]
-
-f_h1HistoricalHighSnapshot() =>
-    var array<float> histHighPrice = array.new_float()
-    var array<int> histHighTime = array.new_int()
-    var array<bool> histHighSharp = array.new_bool()
-
-    // Bereits gespeicherte H1-Highs auf Sweep prüfen.
-    int k = array.size(histHighPrice) - 1
-
-    while k >= 0
-        float storedPrice = array.get(histHighPrice, k)
-
-        bool broken = sweepByWick ?
-             high >= storedPrice + syminfo.mintick :
-             close >= storedPrice + syminfo.mintick
-
-        if broken
-            array.remove(histHighPrice, k)
-            array.remove(histHighTime, k)
-            array.remove(histHighSharp, k)
-
-        k -= 1
-
-    // Neuen bestätigten H1-Swing erkennen.
-    [highSwing, highPrice, highTime, highSharp] = f_h1HighData()
-
-    if highSwing and not na(highPrice) and not na(highTime)
-
-        bool alreadyStored = false
-
-        if array.size(histHighTime) > 0
-            for n = 0 to array.size(histHighTime) - 1
-                if array.get(histHighTime, n) == highTime
-                    alreadyStored := true
-                    break
-
-        if not alreadyStored
-            array.push(histHighPrice, highPrice)
-            array.push(histHighTime, highTime)
-            array.push(histHighSharp, highSharp)
-
-    // Die drei nächsten noch offenen Highs bestimmen.
-    float p1 = na
-    float p2 = na
-    float p3 = na
-
-    int t1 = na
-    int t2 = na
-    int t3 = na
-
-    bool s1 = false
-    bool s2 = false
-    bool s3 = false
-
-    float d1 = na
-    float d2 = na
-    float d3 = na
-
-    if array.size(histHighPrice) > 0
-        for n = 0 to array.size(histHighPrice) - 1
-
-            float p = array.get(histHighPrice, n)
-
-            if p > close
-                float d = p - close
-                int t = array.get(histHighTime, n)
-                bool s = array.get(histHighSharp, n)
-
-                if na(d1) or d < d1
-                    d3 := d2
-                    p3 := p2
-                    t3 := t2
-                    s3 := s2
-
-                    d2 := d1
-                    p2 := p1
-                    t2 := t1
-                    s2 := s1
-
-                    d1 := d
-                    p1 := p
-                    t1 := t
-                    s1 := s
-
-                else if na(d2) or d < d2
-                    d3 := d2
-                    p3 := p2
-                    t3 := t2
-                    s3 := s2
-
-                    d2 := d
-                    p2 := p
-                    t2 := t
-                    s2 := s
-
-                else if na(d3) or d < d3
-                    d3 := d
-                    p3 := p
-                    t3 := t
-                    s3 := s
-
-    [p1, t1, s1, p2, t2, s2, p3, t3, s3]
-
-
-//──────────────────────────────────────────────────────────────────────
-// KANONISCHER 3M-MIRROR: NUR DER LETZTE GERISSENE LEVEL
-//
-// Diese Logik greift NICHT in die vorhandene Level-Erzeugung ein.
-// Diese Logik läuft immer im 3m-Kontext. H1-Swings werden darin explizit
-// aus bestätigten 60m-Daten geholt. Dadurch bleiben Risszeit und Ergebnis
-// nach 3m/H1-Timeframe-Wechseln identisch.
-//──────────────────────────────────────────────────────────────────────
-
-f_mirrorPriority(int code) =>
-    int result = 1
-
-    if code >= 30
-        result := 5
-    else if code >= 20
-        result := 4
-    else if code >= 10
-        result := 3
-    else if code == 2
-        result := 2
-
-    result
-
-
-f_mirrorAddOrUpgrade(
-    array<float> prices,
-    array<bool> highs,
-    array<int> codes,
-    array<int> starts,
-    array<int> created,
-    float price,
-    bool isHigh,
-    int code,
-    int startTime,
-    int createdTime) =>
-
-    int existing = -1
-
-    if not na(price) and not na(startTime)
-        if array.size(prices) > 0
-            for i = 0 to array.size(prices) - 1
-                if array.get(highs, i) == isHigh and f_samePrice(array.get(prices, i), price)
-                    existing := i
-                    break
-
-        if existing >= 0
-            int oldCode = array.get(codes, existing)
-
-            if f_mirrorPriority(code) > f_mirrorPriority(oldCode)
-                array.set(codes, existing, code)
-                array.set(starts, existing, startTime)
-        else
-            array.push(prices, price)
-            array.push(highs, isHigh)
-            array.push(codes, code)
-            array.push(starts, startTime)
-            array.push(created, createdTime)
-
-    true
-
-
-f_h1LastSweptMirror() =>
-    // Nur aktive, swing-basierte Levels werden hier gespeichert.
-    var array<float> ePrice = array.new_float()
-    var array<bool> eHigh = array.new_bool()
-    var array<int> eCode = array.new_int()
-    var array<int> eStart = array.new_int()
-    var array<int> eCreated = array.new_int()
-
-    var float lastPrice = na
-    var int lastCode = 0
-    var int lastStart = na
-    var int lastSweep = na
-    var bool lastIsHigh = false
-
-    // London
-    var float s1High = na
-    var float s1Low = na
-    var int s1HighTime = na
-    var int s1LowTime = na
-    var bool s1HighIsSwing = false
-    var bool s1LowIsSwing = false
-    var int s1HighSwingTime = na
-    var int s1LowSwingTime = na
-    var float pendingS1High = na
-    var float pendingS1Low = na
-    var int pendingS1HighStart = na
-    var int pendingS1LowStart = na
-    var int pendingS1HighSweep = na
-    var int pendingS1LowSweep = na
-    var int pendingS1HighCreated = na
-    var int pendingS1LowCreated = na
-
-    // NY AM
-    var float s2High = na
-    var float s2Low = na
-    var bool s2HighIsSwing = false
-    var bool s2LowIsSwing = false
-    var int s2HighSwingTime = na
-    var int s2LowSwingTime = na
-
-    // NY PM
-    var float s3High = na
-    var float s3Low = na
-    var bool s3HighIsSwing = false
-    var bool s3LowIsSwing = false
-    var int s3HighSwingTime = na
-    var int s3LowSwingTime = na
-    var float pendingS3High = na
-    var float pendingS3Low = na
-
-    // Day
-    var float eDayHigh = na
-    var float eDayLow = na
-    var bool eDayHighIsSwing = false
-    var bool eDayLowIsSwing = false
-    var int eDayHighSwingTime = na
-    var int eDayLowSwingTime = na
-    var float ePendingDayHigh = na
-    var float ePendingDayLow = na
-
-    // Week
-    var float eWeekHigh = na
-    var float eWeekLow = na
-    var bool eWeekHighIsSwing = false
-    var bool eWeekLowIsSwing = false
-    var int eWeekHighSwingTime = na
-    var int eWeekLowSwingTime = na
-    var float ePendingWeekHigh = na
-    var float ePendingWeekLow = na
-
-    
-    //──────────────── London ────────────────
-    bool eInS1 = not na(time(timeframe.period, session1, sessionTZ))
-
-    if eInS1
-        if not eInS1[1]
-            s1High := high
-            s1Low := low
-            s1HighTime := time
-            s1LowTime := time
-            s1HighIsSwing := false
-            s1LowIsSwing := false
-            s1HighSwingTime := na
-            s1LowSwingTime := na
-        else
-            if high > s1High
-                s1High := high
-                s1HighTime := time
-                s1HighIsSwing := false
-                s1HighSwingTime := na
-
-            if low < s1Low
-                s1Low := low
-                s1LowTime := time
-                s1LowIsSwing := false
-                s1LowSwingTime := na
-
-    if showSessions and showSession1 and not eInS1 and eInS1[1]
-        if s1HighIsSwing
-            f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, s1High, true, 11, s1HighSwingTime, time)
-            pendingS1High := na
-        else
-            pendingS1High := s1High
-            pendingS1HighStart := s1HighTime
-            pendingS1HighSweep := na
-            pendingS1HighCreated := time
-
-        if s1LowIsSwing
-            f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, s1Low, false, 11, s1LowSwingTime, time)
-            pendingS1Low := na
-        else
-            pendingS1Low := s1Low
-            pendingS1LowStart := s1LowTime
-            pendingS1LowSweep := na
-            pendingS1LowCreated := time
-
-    // London-Level während Pending-Phase auf Sweep prüfen
-    if not na(pendingS1High) and na(pendingS1HighSweep)
-        bool pendingHighBroken = sweepByWick ? high >= pendingS1High + syminfo.mintick : close >= pendingS1High + syminfo.mintick
-
-        if pendingHighBroken
-            pendingS1HighSweep := time
-
-    if not na(pendingS1Low) and na(pendingS1LowSweep)
-        bool pendingLowBroken = sweepByWick ? low <= pendingS1Low - syminfo.mintick : close <= pendingS1Low - syminfo.mintick
-
-        if pendingLowBroken
-            pendingS1LowSweep := time
-
-    //──────────────── NY AM ────────────────
-    bool eInS2 = not na(time(timeframe.period, session2, sessionTZ))
-
-    if eInS2
-        if not eInS2[1]
-            s2High := high
-            s2Low := low
-            s2HighIsSwing := false
-            s2LowIsSwing := false
-            s2HighSwingTime := na
-            s2LowSwingTime := na
-        else
-            if high > s2High
-                s2High := high
-                s2HighIsSwing := false
-                s2HighSwingTime := na
-
-            if low < s2Low
-                s2Low := low
-                s2LowIsSwing := false
-                s2LowSwingTime := na
-
-    if showSessions and showSession2 and not eInS2 and eInS2[1]
-        if s2HighIsSwing
-            f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, s2High, true, 12, s2HighSwingTime, time)
-
-        if s2LowIsSwing
-            f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, s2Low, false, 12, s2LowSwingTime, time)
-
-    //──────────────── NY PM ────────────────
-    bool eInS3 = not na(time(timeframe.period, session3, sessionTZ))
-
-    if eInS3
-        if not eInS3[1]
-            s3High := high
-            s3Low := low
-            s3HighIsSwing := false
-            s3LowIsSwing := false
-            s3HighSwingTime := na
-            s3LowSwingTime := na
-        else
-            if high > s3High
-                s3High := high
-                s3HighIsSwing := false
-                s3HighSwingTime := na
-
-            if low < s3Low
-                s3Low := low
-                s3LowIsSwing := false
-                s3LowSwingTime := na
-
-    if showSessions and showSession3 and not eInS3 and eInS3[1]
-        if s3HighIsSwing
-            f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, s3High, true, 13, s3HighSwingTime, time)
-            pendingS3High := na
-        else
-            pendingS3High := s3High
-
-        if s3LowIsSwing
-            f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, s3Low, false, 13, s3LowSwingTime, time)
-            pendingS3Low := na
-        else
-            pendingS3Low := s3Low
-
-    //──────────────── Day ────────────────
-    int eNyYear = year(time, "America/New_York")
-    int eNyMonth = month(time, "America/New_York")
-    int eNyDay = dayofmonth(time, "America/New_York")
-    bool eNewDay = eNyDay != eNyDay[1] or eNyMonth != eNyMonth[1] or eNyYear != eNyYear[1]
-
-    if na(eDayHigh)
-        eDayHigh := high
-        eDayLow := low
-    else if eNewDay
-        if showPD
-            if eDayHighIsSwing
-                f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, eDayHigh, true, 20, eDayHighSwingTime, time)
-                ePendingDayHigh := na
-            else
-                ePendingDayHigh := eDayHigh
-
-            if eDayLowIsSwing
-                f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, eDayLow, false, 20, eDayLowSwingTime, time)
-                ePendingDayLow := na
-            else
-                ePendingDayLow := eDayLow
-
-        eDayHigh := high
-        eDayLow := low
-        eDayHighIsSwing := false
-        eDayLowIsSwing := false
-        eDayHighSwingTime := na
-        eDayLowSwingTime := na
-    else
-        if high > eDayHigh
-            eDayHigh := high
-            eDayHighIsSwing := false
-            eDayHighSwingTime := na
-
-        if low < eDayLow
-            eDayLow := low
-            eDayLowIsSwing := false
-            eDayLowSwingTime := na
-
-    //──────────────── Week ────────────────
-    bool eNewWeek = timeframe.change("W")
-
-    if na(eWeekHigh)
-        eWeekHigh := high
-        eWeekLow := low
-    else if eNewWeek
-        if showPW
-            if eWeekHighIsSwing
-                f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, eWeekHigh, true, 30, eWeekHighSwingTime, time)
-                ePendingWeekHigh := na
-            else
-                ePendingWeekHigh := eWeekHigh
-
-            if eWeekLowIsSwing
-                f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, eWeekLow, false, 30, eWeekLowSwingTime, time)
-                ePendingWeekLow := na
-            else
-                ePendingWeekLow := eWeekLow
-
-        eWeekHigh := high
-        eWeekLow := low
-        eWeekHighIsSwing := false
-        eWeekLowIsSwing := false
-        eWeekHighSwingTime := na
-        eWeekLowSwingTime := na
-    else
-        if high > eWeekHigh
-            eWeekHigh := high
-            eWeekHighIsSwing := false
-            eWeekHighSwingTime := na
-
-        if low < eWeekLow
-            eWeekLow := low
-            eWeekLowIsSwing := false
-            eWeekLowSwingTime := na
-
-    //──────────────── Neue H1-Swings ────────────────
-    // Dieser Mirror läuft absichtlich im 3m-Kontext. Die H1-Swings werden
-    // deshalb hier explizit aus dem bestätigten 60m-Kontext geholt.
-    [eSwingHigh, eSwingHighPrice, eSwingHighTime, eSharpHigh] = request.security(
-        syminfo.tickerid,
-        "60",
-        f_h1HighData(),
-        lookahead=barmerge.lookahead_off)
-
-    [eSwingLow, eSwingLowPrice, eSwingLowTime, eSharpLow] = request.security(
-        syminfo.tickerid,
-        "60",
-        f_h1LowData(),
-        lookahead=barmerge.lookahead_off)
-
-    bool eNewSwingHigh = not na(eSwingHighTime) and (na(eSwingHighTime[1]) or eSwingHighTime != eSwingHighTime[1])
-    bool eNewSwingLow = not na(eSwingLowTime) and (na(eSwingLowTime[1]) or eSwingLowTime != eSwingLowTime[1])
-
-    if eNewSwingHigh
-        // Falls ein bereits beendetes London-H vor seiner H1-Bestätigung
-        // auf 3m gerissen wurde, darf derselbe Preis nicht als neuer Swing H
-        // wieder auferstehen. Der gespeicherte London-Riss gewinnt.
-        bool sweptPendingLondonHigh = showSessions and showSession1 and not na(pendingS1HighSweep) and f_samePrice(eSwingHighPrice, pendingS1High)
-
-        if showSwings and not sweptPendingLondonHigh
-            int highCode = showSharp and eSharpHigh ? 2 : 1
-            f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, eSwingHighPrice, true, highCode, eSwingHighTime, time)
-
-        if eInS1 and f_samePrice(eSwingHighPrice, s1High)
-            s1HighIsSwing := true
-            s1HighSwingTime := eSwingHighTime
-
-        if showSessions and showSession1 and f_samePrice(eSwingHighPrice, pendingS1High)
-
-            if not na(pendingS1HighSweep)
-
-                bool pendingHighBecomesLatest = na(lastSweep) or pendingS1HighSweep > lastSweep or (pendingS1HighSweep == lastSweep and (not lastIsHigh or pendingS1High > lastPrice))
-
-                if pendingHighBecomesLatest
-                    lastPrice := pendingS1High
-                    lastCode := 11
-                    lastStart := pendingS1HighStart
-                    lastSweep := pendingS1HighSweep
-                    lastIsHigh := true
-
-            else
-                f_mirrorAddOrUpgrade(
-                    ePrice,
-                    eHigh,
-                    eCode,
-                    eStart,
-                    eCreated,
-                    pendingS1High,
-                    true,
-                    11,
-                    pendingS1HighStart,
-                    time)
-
-            pendingS1High := na
-            pendingS1HighStart := na
-            pendingS1HighSweep := na
-            pendingS1HighCreated := na
-
-        if eInS2 and f_samePrice(eSwingHighPrice, s2High)
-            s2HighIsSwing := true
-            s2HighSwingTime := eSwingHighTime
-
-        if eInS3 and f_samePrice(eSwingHighPrice, s3High)
-            s3HighIsSwing := true
-            s3HighSwingTime := eSwingHighTime
-
-        if showSessions and showSession3 and f_samePrice(eSwingHighPrice, pendingS3High)
-            f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, pendingS3High, true, 13, eSwingHighTime, time)
-            pendingS3High := na
-
-        if f_samePrice(eSwingHighPrice, eDayHigh)
-            eDayHighIsSwing := true
-            eDayHighSwingTime := eSwingHighTime
-
-        if showPD and f_samePrice(eSwingHighPrice, ePendingDayHigh)
-            f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, ePendingDayHigh, true, 20, eSwingHighTime, time)
-            ePendingDayHigh := na
-
-        if f_samePrice(eSwingHighPrice, eWeekHigh)
-            eWeekHighIsSwing := true
-            eWeekHighSwingTime := eSwingHighTime
-
-        if showPW and f_samePrice(eSwingHighPrice, ePendingWeekHigh)
-            f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, ePendingWeekHigh, true, 30, eSwingHighTime, time)
-            ePendingWeekHigh := na
-
-    if eNewSwingLow
-        // Gleiches Prinzip für London-L: ein bereits auf 3m gerissenes
-        // Pending-Level darf nach der H1-Bestätigung nicht als Swing L
-        // wieder aktiv werden.
-        bool sweptPendingLondonLow = showSessions and showSession1 and not na(pendingS1LowSweep) and f_samePrice(eSwingLowPrice, pendingS1Low)
-
-        if showSwings and not sweptPendingLondonLow
-            int lowCode = showSharp and eSharpLow ? 2 : 1
-            f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, eSwingLowPrice, false, lowCode, eSwingLowTime, time)
-
-        if eInS1 and f_samePrice(eSwingLowPrice, s1Low)
-            s1LowIsSwing := true
-            s1LowSwingTime := eSwingLowTime
-
-        if showSessions and showSession1 and f_samePrice(eSwingLowPrice, pendingS1Low)
-
-            if not na(pendingS1LowSweep)
-
-                bool pendingLowBecomesLatest = na(lastSweep) or pendingS1LowSweep > lastSweep or (pendingS1LowSweep == lastSweep and (lastIsHigh or pendingS1Low < lastPrice))
-
-                if pendingLowBecomesLatest
-                    lastPrice := pendingS1Low
-                    lastCode := 11
-                    lastStart := pendingS1LowStart
-                    lastSweep := pendingS1LowSweep
-                    lastIsHigh := false
-
-            else
-                f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, pendingS1Low, false, 11, pendingS1LowStart, time)
-
-            pendingS1Low := na
-            pendingS1LowStart := na
-            pendingS1LowSweep := na
-            pendingS1LowCreated := na
-
-        if eInS2 and f_samePrice(eSwingLowPrice, s2Low)
-            s2LowIsSwing := true
-            s2LowSwingTime := eSwingLowTime
-
-        if eInS3 and f_samePrice(eSwingLowPrice, s3Low)
-            s3LowIsSwing := true
-            s3LowSwingTime := eSwingLowTime
-
-        if showSessions and showSession3 and f_samePrice(eSwingLowPrice, pendingS3Low)
-            f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, pendingS3Low, false, 13, eSwingLowTime, time)
-            pendingS3Low := na
-
-        if f_samePrice(eSwingLowPrice, eDayLow)
-            eDayLowIsSwing := true
-            eDayLowSwingTime := eSwingLowTime
-
-        if showPD and f_samePrice(eSwingLowPrice, ePendingDayLow)
-            f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, ePendingDayLow, false, 20, eSwingLowTime, time)
-            ePendingDayLow := na
-
-        if f_samePrice(eSwingLowPrice, eWeekLow)
-            eWeekLowIsSwing := true
-            eWeekLowSwingTime := eSwingLowTime
-
-        if showPW and f_samePrice(eSwingLowPrice, ePendingWeekLow)
-            f_mirrorAddOrUpgrade(ePrice, eHigh, eCode, eStart, eCreated, ePendingWeekLow, false, 30, eSwingLowTime, time)
-            ePendingWeekLow := na
-
-    //──────────────── Sweeps ────────────────
-    int sweepIndex = 0
-
-    while sweepIndex < array.size(ePrice)
-        float p = array.get(ePrice, sweepIndex)
-        bool isHigh = array.get(eHigh, sweepIndex)
-        int createdTime = array.get(eCreated, sweepIndex)
-        bool swept = false
-
-        if time > createdTime
-            if sweepByWick
-                if isHigh
-                    swept := high >= p + syminfo.mintick
-                else
-                    swept := low <= p - syminfo.mintick
-            else
-                if isHigh
-                    swept := close >= p + syminfo.mintick
-                else
-                    swept := close <= p - syminfo.mintick
-
-        if swept
-            bool becomesLatest =
-                 na(lastSweep) or
-                 time > lastSweep or
-                 (
-                     time == lastSweep and
-                     isHigh == lastIsHigh and
-                     (
-                         (isHigh and p > lastPrice) or
-                         (not isHigh and p < lastPrice)
-                     )
-                 )
-
-            if becomesLatest
-                lastPrice := p
-                lastCode := array.get(eCode, sweepIndex)
-                lastStart := array.get(eStart, sweepIndex)
-                lastSweep := time
-                lastIsHigh := isHigh
-
-            array.remove(ePrice, sweepIndex)
-            array.remove(eHigh, sweepIndex)
-            array.remove(eCode, sweepIndex)
-            array.remove(eStart, sweepIndex)
-            array.remove(eCreated, sweepIndex)
-        else
-            sweepIndex += 1
-
-    [lastPrice, lastCode, lastStart, lastSweep, lastIsHigh]
-
-
 f_mirrorSourceText(int code, bool isHigh) =>
     string txt = ""
 
@@ -1559,6 +339,8 @@ f_mirrorSourceText(int code, bool isHigh) =>
         txt := isHigh ? "Swing H" : "Swing L"
     else if code == 2
         txt := isHigh ? "SPITZ H" : "SPITZ L"
+    else if code == 10
+        txt := isHigh ? "Asia H" : "Asia L"
     else if code == 11
         txt := isHigh ? "London H" : "London L"
     else if code == 12
@@ -1588,1470 +370,382 @@ f_mirrorColor(int code) =>
     c
 
 
-[
-    h1MirrorLastPrice,
-    h1MirrorLastCode,
-    h1MirrorLastStart,
-    h1MirrorLastSweep,
-    h1MirrorLastIsHigh
-] = request.security(
-    syminfo.tickerid,
-    "3",
-    f_h1LastSweptMirror(),
-    lookahead=barmerge.lookahead_off)
-
-// H1-Daten auf jeden Chart holen
-[
-    h1SwingHigh,
-    h1SwingHighPrice,
-    h1SwingHighTime,
-    h1SharpHigh
-] = request.security(
-     syminfo.tickerid,
-     swingTf,
-     f_h1HighData(),
-        lookahead=barmerge.lookahead_off)
-
-[
-    h1SwingLow,
-    h1SwingLowPrice,
-    h1SwingLowTime,
-    h1SharpLow
-] = request.security(
-     syminfo.tickerid,
-     swingTf,
-     f_h1LowData(),
-          lookahead=barmerge.lookahead_off)
-
-[
-    histHigh1Price,
-    histHigh1Time,
-    histHigh1Sharp,
-    histHigh2Price,
-    histHigh2Time,
-    histHigh2Sharp,
-    histHigh3Price,
-    histHigh3Time,
-    histHigh3Sharp
-] = request.security(
-    syminfo.tickerid,
-    swingTf,
-    f_h1HistoricalHighSnapshot(),
-    lookahead=barmerge.lookahead_off,
-    calc_bars_count=5000)
-
-[
-    nyPDH,
-    nyPDL,
-    nyPDHTime,
-    nyPDLTime,
-    nyPDHSwept,
-    nyPDLSwept,
-    nyPDHSweepTime,
-    nyPDLSweepTime
-] = request.security(
-    syminfo.tickerid,
-    swingTf,
-    f_nyPreviousDayState(),
-    lookahead=barmerge.lookahead_off,
-    calc_bars_count=5000)
-
-
-
-[
-    histNyPmHigh,
-    histNyPmLow,
-    histNyPmHighTime,
-    histNyPmLowTime,
-    histNyPmHighSwept,
-    histNyPmLowSwept,
-    histNyPmHighSweepTime,
-    histNyPmLowSweepTime
-] = request.security(
-    syminfo.tickerid,
-    swingTf,
-    f_nyPmState(),
-    lookahead=barmerge.lookahead_off,
-    calc_bars_count=5000)
-
-if barstate.islast
-
-    if not na(histNyPmHigh) and not na(histNyPmHighTime) and not histNyPmHighSwept
-        f_addOrUpgradeLevel(
-            histNyPmHigh,
-            true,
-            "NY PM H",
-            colSession,
-            3,
-            histNyPmHighTime)
-
-    if not na(histNyPmLow) and not na(histNyPmLowTime) and not histNyPmLowSwept
-        f_addOrUpgradeLevel(
-            histNyPmLow,
-            false,
-            "NY PM L",
-            colSession,
-            3,
-            histNyPmLowTime)
-
-
-if barstate.islast
-
-    // ─────────────────────────────────────
-    // PDH
-    // ─────────────────────────────────────
-    if not na(nyPDH) and not na(nyPDHTime) and not nyPDHSwept
-
-        f_addOrUpgradeLevel(
-            nyPDH,
-            true,
-            "PDH",
-            colDay,
-            4,
-            nyPDHTime)
-
-
-
-    // ─────────────────────────────────────
-    // PDL
-    // ─────────────────────────────────────
-    if not na(nyPDL) and not na(nyPDLTime) and not nyPDLSwept
-
-        f_addOrUpgradeLevel(
-            nyPDL,
-            false,
-            "PDL",
-            colDay,
-            4,
-            nyPDLTime)
-
-if barstate.islast
-
-    if not na(histHigh1Price) and not na(histHigh1Time)
-        f_addOrUpgradeLevel(
-            histHigh1Price,
-            true,
-            histHigh1Sharp ? "SPITZ H" : "Swing H",
-            histHigh1Sharp ? colSharp : colSwing,
-            histHigh1Sharp ? 2 : 1,
-            histHigh1Time)
-
-    if not na(histHigh2Price) and not na(histHigh2Time)
-        f_addOrUpgradeLevel(
-            histHigh2Price,
-            true,
-            histHigh2Sharp ? "SPITZ H" : "Swing H",
-            histHigh2Sharp ? colSharp : colSwing,
-            histHigh2Sharp ? 2 : 1,
-            histHigh2Time)
-
-    if not na(histHigh3Price) and not na(histHigh3Time)
-        f_addOrUpgradeLevel(
-            histHigh3Price,
-            true,
-            histHigh3Sharp ? "SPITZ H" : "Swing H",
-            histHigh3Sharp ? colSharp : colSwing,
-            histHigh3Sharp ? 2 : 1,
-            histHigh3Time)
-
-[
-    histLow1Price,
-    histLow1Time,
-    histLow1Sharp,
-    histLow2Price,
-    histLow2Time,
-    histLow2Sharp,
-    histLow3Price,
-    histLow3Time,
-    histLow3Sharp
-] = request.security(
-    syminfo.tickerid,
-    swingTf,
-    f_h1HistoricalLowSnapshot(),
-    lookahead=barmerge.lookahead_off,
-    calc_bars_count=5000)
-
-if barstate.islast
-
-    if not na(histLow1Price) and not na(histLow1Time) and not f_hasLevelAtPrice(histLow1Price, false)
-        f_addOrUpgradeLevel(
-            histLow1Price,
-            false,
-            histLow1Sharp ? "SPITZ L" : "Swing L",
-            histLow1Sharp ? colSharp : colSwing,
-            histLow1Sharp ? 2 : 1,
-            histLow1Time)
-
-    if not na(histLow2Price) and not na(histLow2Time) and not f_hasLevelAtPrice(histLow2Price, false)
-        f_addOrUpgradeLevel(
-            histLow2Price,
-            false,
-            histLow2Sharp ? "SPITZ L" : "Swing L",
-            histLow2Sharp ? colSharp : colSwing,
-            histLow2Sharp ? 2 : 1,
-            histLow2Time)
-
-    if not na(histLow3Price) and not na(histLow3Time) and not f_hasLevelAtPrice(histLow3Price, false)
-        f_addOrUpgradeLevel(
-            histLow3Price,
-            false,
-            histLow3Sharp ? "SPITZ L" : "Swing L",
-            histLow3Sharp ? colSharp : colSwing,
-            histLow3Sharp ? 2 : 1,
-            histLow3Time)
-
-// Neues Signal nur einmal auslösen
-bool newH1SwingHigh = not na(h1SwingHighTime) and (na(h1SwingHighTime[1]) or h1SwingHighTime != h1SwingHighTime[1])
-
-bool newH1SwingLow = not na(h1SwingLowTime) and (na(h1SwingLowTime[1]) or h1SwingLowTime != h1SwingLowTime[1])
-
 //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 5. SESSION 0 – Asia
+// EIN ZUSTAND: abgeschlossene 3m-Bars -> Levels -> Darstellung
 //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-inSession0 =
-     not na(
-         time(
-             timeframe.period,
-             session0,
-             sessionTZ))
-
-var float session0High = na
-var float session0Low = na
-
-var bool session0HighIsSwing = false
-var bool session0LowIsSwing = false
-
-var int session0HighSwingTime = na
-var int session0LowSwingTime = na
-
-// Noch nicht bestätigte abgeschlossene Session
-var float pendingS0High = na
-var float pendingS0Low = na
-
-
-if inSession0
-
-    if not inSession0[1]
-
-        session0High := high
-        session0Low := low
-
-        session0HighIsSwing := false
-        session0LowIsSwing := false
-
-        session0HighSwingTime := na
-        session0LowSwingTime := na
-
-    else
-
-        if high > session0High
-            session0High := high
-            session0HighIsSwing := false
-            session0HighSwingTime := na
-
-        if low < session0Low
-            session0Low := low
-            session0LowIsSwing := false
-            session0LowSwingTime := na
-
-
-// Session endet
-if showSessions and
-   showSession0 and
-   not inSession0 and
-   inSession0[1]
-
-    if session0HighIsSwing
-
-        f_addOrUpgradeLevel(
-             session0High,
-             true,
-             "Asia H",
-             colSession,
-             3,
-             session0HighSwingTime)
-
-        pendingS0High := na
-
-    else
-
-        pendingS0High := session0High
-
-
-    if session0LowIsSwing
-
-        f_addOrUpgradeLevel(
-             session0Low,
-             false,
-             "Asia L",
-             colSession,
-             3,
-             session0LowSwingTime)
-
-        pendingS0Low := na
-
-    else
-
-        pendingS0Low := session0Low
-
-
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 6. SESSION 1 – LONDON
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-inSession1 =
-     not na(
-         time(
-             timeframe.period,
-             session1,
-             sessionTZ))
-
-var float session1High = na
-var float session1Low = na
-
-var bool session1HighIsSwing = false
-var bool session1LowIsSwing = false
-
-var int session1HighSwingTime = na
-var int session1LowSwingTime = na
-
-// Noch nicht bestätigte abgeschlossene Session
-var float pendingS1High = na
-var float pendingS1Low = na
-var int pendingS1HighTime = na
-var int pendingS1LowTime = na
-
-
-if inSession1
-
-    if not inSession1[1]
-
-        session1High := high
-        session1Low := low
-        session1HighSwingTime := time
-        session1LowSwingTime := time
-
-        session1HighIsSwing := false
-        session1LowIsSwing := false
-
-        session1HighSwingTime := time
-        session1LowSwingTime := time
-
-    else
-
-        if high > session1High
-            session1High := high
-            session1HighIsSwing := false
-            session1HighSwingTime := time
-
-        if low < session1Low
-            session1Low := low
-            session1LowIsSwing := false
-            session1LowSwingTime := time
-
-
-// Session endet
-if showSessions and
-   showSession1 and
-   not inSession1 and
-   inSession1[1]
-
-    if session1HighIsSwing
-
-        f_addOrUpgradeLevel(
-             session1High,
-             true,
-             "London H",
-             colSession,
-             3,
-             session1HighSwingTime)
-
-        pendingS1High := na
-
-    else
-
-        pendingS1High := session1High
-        pendingS1HighTime := session1HighSwingTime
-
-
-    if session1LowIsSwing
-
-        f_addOrUpgradeLevel(
-             session1Low,
-             false,
-             "London L",
-             colSession,
-             3,
-             session1LowSwingTime)
-
-        pendingS1Low := na
-
-    else
-
-        pendingS1Low := session1Low
-        pendingS1LowTime := session1LowSwingTime
-
-
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 7. SESSION 2 – NY AM
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-inSession2 =
-     not na(
-         time(
-             timeframe.period,
-             session2,
-             sessionTZ))
-
-var float session2High = na
-var float session2Low = na
-
-var bool session2HighIsSwing = false
-var bool session2LowIsSwing = false
-
-var int session2HighSwingTime = na
-var int session2LowSwingTime = na
-
-
-if inSession2
-
-    if not inSession2[1]
-
-        session2High := high
-        session2Low := low
-
-        session2HighIsSwing := false
-        session2LowIsSwing := false
-
-        session2HighSwingTime := na
-        session2LowSwingTime := na
-
-    else
-
-        if high > session2High
-            session2High := high
-            session2HighIsSwing := false
-            session2HighSwingTime := na
-
-        if low < session2Low
-            session2Low := low
-            session2LowIsSwing := false
-            session2LowSwingTime := na
-
-
-if showSessions and
-   showSession2 and
-   not inSession2 and
-   inSession2[1]
-
-    if session2HighIsSwing
-
-        f_addOrUpgradeLevel(
-             session2High,
-             true,
-             "NY AM H",
-             colSession,
-             3,
-             session2HighSwingTime)
-
-
-    if session2LowIsSwing
-
-        f_addOrUpgradeLevel(
-             session2Low,
-             false,
-             "NY AM L",
-             colSession,
-             3,
-             session2LowSwingTime)
-
-
-
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 8. SESSION 3 – NY PM
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-inSession3 =
-     not na(
-         time(
-             timeframe.period,
-             session3,
-             sessionTZ))
-
-var float session3High = na
-var float session3Low = na
-
-var bool session3HighIsSwing = false
-var bool session3LowIsSwing = false
-
-var int session3HighSwingTime = na
-var int session3LowSwingTime = na
-
-var float pendingS3High = na
-var float pendingS3Low = na
-
-
-if inSession3
-
-    if not inSession3[1]
-
-        session3High := high
-        session3Low := low
-
-        session3HighIsSwing := false
-        session3LowIsSwing := false
-
-        session3HighSwingTime := na
-        session3LowSwingTime := na
-
-    else
-
-        if high > session3High
-            session3High := high
-            session3HighIsSwing := false
-            session3HighSwingTime := na
-
-        if low < session3Low
-            session3Low := low
-            session3LowIsSwing := false
-            session3LowSwingTime := na
-
-
-if showSessions and
-   showSession3 and
-   not inSession3 and
-   inSession3[1]
-
-    if session3HighIsSwing
-
-        f_addOrUpgradeLevel(
-             session3High,
-             true,
-             "NY PM H",
-             colSession,
-             3,
-             session3HighSwingTime)
-
-        pendingS3High := na
-
-    else
-
-        pendingS3High := session3High
-
-
-    if session3LowIsSwing
-
-        f_addOrUpgradeLevel(
-             session3Low,
-             false,
-             "NY PM L",
-             colSession,
-             3,
-             session3LowSwingTime)
-
-        pendingS3Low := na
-
-    else
-
-        pendingS3Low := session3Low
-
-
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 9. DAY HIGH / LOW
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-var float dayHigh = na
-var float dayLow = na
-
-var bool dayHighIsSwing = false
-var bool dayLowIsSwing = false
-
-var int dayHighSwingTime = na
-var int dayLowSwingTime = na
-
-var float pendingDayHigh = na
-var float pendingDayLow = na
-
-nyYear  = year(time, "America/New_York")
-nyMonth = month(time, "America/New_York")
-nyDay   = dayofmonth(time, "America/New_York")
-
-newDay = nyDay != nyDay[1] or nyMonth != nyMonth[1] or nyYear != nyYear[1]
-
-
-if na(dayHigh)
-
-    dayHigh := high
-    dayLow := low
-
-else if newDay
-
-    // Vortag abschließen
-    if showPD
-
-        if dayHighIsSwing
-
-            f_addOrUpgradeLevel(
-                 dayHigh,
-                 true,
-                 "PDH",
-                 colDay,
-                 4,
-                 dayHighSwingTime)
-
-            pendingDayHigh := na
-
+f_mirrorPriority(int code) =>
+    code >= 30 ? 5 : code >= 20 ? 4 : code >= 10 ? 3 : code == 2 ? 2 : 1
+
+// Reine Datenabfrage, KEINE var-Arrays in request-Kontexten.
+// Alle H1-Ausdrücke benutzen mindestens [1]. lookahead_on liefert diese
+// bereits bestätigten Werte ab dem Anfang der nächsten H1, auch historisch.
+f_confirmedH1() =>
+    [sh, ph, th, sharpH] = f_h1HighData()
+    [sl, pl, tl, sharpL] = f_h1LowData()
+    [sh, ph, th, sharpH, sl, pl, tl, sharpL, time[2], time[3]]
+
+type CanonicalBar
+    int t
+    int endTime
+    float h
+    float l
+    float c
+    int hourStart
+    int dayKey
+    int weekKey
+    bool s0
+    bool s1
+    bool s2
+    bool s3
+    int s0Key
+    int s1Key
+    int s2Key
+    int s3Key
+    float swingH
+    int swingHStart
+    bool sharpH
+    float swingL
+    int swingLStart
+    bool sharpL
+    int swingLastOrigin
+    int oldestSwingOrigin
+
+f_canonicalBar() =>
+    [sh, ph, th, sharpH, sl, pl, tl, sharpL, swingLastOrigin, oldestSwingOrigin] = request.security(
+        syminfo.tickerid, "60", f_confirmedH1(),
+        lookahead=barmerge.lookahead_on)
+    int dayKey = year(time, "America/New_York") * 10000 + month(time, "America/New_York") * 100 + dayofmonth(time, "America/New_York")
+    CanonicalBar.new(
+        time, time_close, high, low, close, time("60"),
+        dayKey, time("W"),
+        not na(time("3", session0, sessionTZ)),
+        not na(time("3", session1, sessionTZ)),
+        not na(time("3", session2, sessionTZ)),
+        not na(time("3", session3, sessionTZ)),
+        time("1D", session0, sessionTZ), time("1D", session1, sessionTZ),
+        time("1D", session2, sessionTZ), time("1D", session3, sessionTZ),
+        sh ? ph : na, th, sharpH, sl ? pl : na, tl, sharpL, swingLastOrigin, oldestSwingOrigin)
+
+type LiquidityLevel
+    int id
+    float price
+    bool isHigh
+    int code
+    int start
+    int created
+    int sweptAt
+    bool confirmedSwing
+    // Preis allein ist keine Identität. Mehrere aktive Quellen dürfen
+    // zusammenfallen; ihre H1-Ursprünge bleiben für spätere Upgrades erhalten.
+    array<int> origins
+
+type LiquidityPeriod
+    bool running = false
+    bool complete = false
+    int key = na
+    float hi = na
+    float lo = na
+    int hiTime = na
+    int loTime = na
+    int hiHour = na
+    int loHour = na
+
+type LiquidityState
+    array<LiquidityLevel> levels
+    array<LiquidityPeriod> periods
+    int nextId = 0
+    bool mergeNeeded = false
+    int processed = na
+    int highSignal = na
+    int lowSignal = na
+    LiquidityLevel lastSwept = na
+
+f_hasOrigin(LiquidityLevel level, int origin, int lastOrigin) =>
+    bool found = false
+    for stamp in level.origins
+        if stamp >= origin and stamp <= lastOrigin
+            found := true
+            break
+    found
+
+// Einziger Schreibpfad für Swing-, Session-, Tages- und Wochen-Level.
+// sweptAt wird hier NIE zurückgesetzt, auch nicht bei einer H1-Bestätigung.
+f_addOrUpgradeLevel(
+    LiquidityState state, float price, bool isHigh, int code, int startTime,
+    int origin, int lastOrigin, int created, bool confirmedSwing) =>
+    int existing = -1
+    int activeAtPrice = -1
+    if not na(price) and not na(startTime) and not na(origin)
+        state.mergeNeeded := true
+        if array.size(state.levels) > 0
+            for i = 0 to array.size(state.levels) - 1
+                LiquidityLevel level = array.get(state.levels, i)
+                if level.isHigh == isHigh and f_samePrice(level.price, price)
+                    if f_hasOrigin(level, origin, lastOrigin)
+                        existing := i
+                        break
+                    if na(level.sweptAt) and level.confirmedSwing
+                        activeAtPrice := i
+        // Ein gerissener gleicher Preis mit ANDEREM Ursprung ist kein
+        // Verbot für ein tatsächlich neues Level an einem späteren Tag.
+        if existing < 0
+            existing := activeAtPrice
+        if existing >= 0
+            LiquidityLevel level = array.get(state.levels, existing)
+            level.confirmedSwing := level.confirmedSwing or confirmedSwing
+            if not array.includes(level.origins, origin)
+                array.push(level.origins, origin)
+            // Bei Doppel-Swings gehört auch die zweite H1 zum Ursprung.
+            if lastOrigin != origin and not array.includes(level.origins, lastOrigin)
+                array.push(level.origins, lastOrigin)
+            if f_mirrorPriority(code) > f_mirrorPriority(level.code)
+                level.code := code
+                level.start := startTime
         else
+            array<int> origins = array.from(origin)
+            if lastOrigin != origin
+                array.push(origins, lastOrigin)
+            array.push(state.levels, LiquidityLevel.new(
+                state.nextId, price, isHigh, code, startTime, created, na, confirmedSwing, origins))
+            state.nextId += 1
+    true
 
-            pendingDayHigh := dayHigh
+f_priceKey(LiquidityLevel level) =>
+    int(math.round(level.price / syminfo.mintick)) * 2 + (level.isHigh ? 1 : 0)
 
+f_mergeOpenLevels(LiquidityState state) =>
+    // Nur bei neuen Quellen/Upgrades zusammenführen, nicht quadratisch
+    // für jeden Intrabar. Map-Werte sind Referenzen auf dieselben Levels.
+    map<int, LiquidityLevel> openByPrice = map.new<int, LiquidityLevel>()
+    for level in state.levels
+        if na(level.sweptAt) and level.confirmedSwing
+            int key = f_priceKey(level)
+            if not map.contains(openByPrice, key)
+                map.put(openByPrice, key, level)
+    int i = 0
+    while i < array.size(state.levels)
+        LiquidityLevel other = array.get(state.levels, i)
+        int key = f_priceKey(other)
+        bool removed = false
+        if na(other.sweptAt) and map.contains(openByPrice, key)
+            LiquidityLevel target = map.get(openByPrice, key)
+            if target.id != other.id
+                target.created := math.min(target.created, other.created)
+                for stamp in other.origins
+                    if not array.includes(target.origins, stamp)
+                        array.push(target.origins, stamp)
+                if f_mirrorPriority(other.code) > f_mirrorPriority(target.code)
+                    target.code := other.code
+                    target.start := other.start
+                array.remove(state.levels, i)
+                removed := true
+        if not removed
+            i += 1
+    state.mergeNeeded := false
+    true
 
-        if dayLowIsSwing
+f_enabled(LiquidityLevel level) =>
+    // PD und NY PM waren bereits über die früheren H1-Snapshots auch
+    // ohne Swing sichtbar. Diese Quellen bleiben unabhängig davon gültig.
+    (level.confirmedSwing or level.code == 13 or level.code == 20) and (level.code >= 10 or showSwings)
 
-            f_addOrUpgradeLevel(
-                 dayLow,
-                 false,
-                 "PDL",
-                 colDay,
-                 4,
-                 dayLowSwingTime)
-
-            pendingDayLow := na
-
+// Keine rekonstruierte Reihenfolge innerhalb eines 3m-OHLC-Bars erfinden.
+// Gleichzeitige Risse: High vor Low, außen vor innen, dann Priorität und
+// Ursprung. Damit hängt der Gewinner nicht von der Array-Reihenfolge ab.
+f_laterSweep(LiquidityLevel candidate, LiquidityLevel previous) =>
+    bool later = na(previous)
+    if not later
+        if candidate.sweptAt != previous.sweptAt
+            later := candidate.sweptAt > previous.sweptAt
+        else if candidate.isHigh != previous.isHigh
+            later := candidate.isHigh
+        else if not f_samePrice(candidate.price, previous.price)
+            later := candidate.isHigh ? candidate.price > previous.price : candidate.price < previous.price
+        else if f_mirrorPriority(candidate.code) != f_mirrorPriority(previous.code)
+            later := f_mirrorPriority(candidate.code) > f_mirrorPriority(previous.code)
         else
+            later := candidate.start > previous.start
+    later
 
-            pendingDayLow := dayLow
-
-
-    // neuen Tag starten
-    dayHigh := high
-    dayLow := low
-
-    dayHighIsSwing := false
-    dayLowIsSwing := false
-
-    dayHighSwingTime := na
-    dayLowSwingTime := na
-
-
-else
-
-    if high > dayHigh
-        dayHigh := high
-        dayHighIsSwing := false
-        dayHighSwingTime := na
-
-    if low < dayLow
-        dayLow := low
-        dayLowIsSwing := false
-        dayLowSwingTime := na
-
-
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 10. WEEK HIGH / LOW
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-var float weekHigh = na
-var float weekLow = na
-
-var bool weekHighIsSwing = false
-var bool weekLowIsSwing = false
-
-var int weekHighSwingTime = na
-var int weekLowSwingTime = na
-
-var float pendingWeekHigh = na
-var float pendingWeekLow = na
-
-newWeek = timeframe.change("W")
-
-
-if na(weekHigh)
-
-    weekHigh := high
-    weekLow := low
-
-else if newWeek
-
-    if showPW
-
-        if weekHighIsSwing
-
-            f_addOrUpgradeLevel(
-                 weekHigh,
-                 true,
-                 "PWH",
-                 colWeek,
-                 5,
-                 weekHighSwingTime)
-
-            pendingWeekHigh := na
-
+// Dieselbe Pending-Logik für ALLE Sessions, PD und PW. Auch noch nicht
+// H1-bestätigte abgeschlossene Perioden nehmen bereits an Sweeps teil.
+f_updatePeriod(LiquidityState state, int slot, bool inside, int key, bool enabled, int code, CanonicalBar b) =>
+    LiquidityPeriod period = array.get(state.periods, slot)
+    bool boundary = period.running and (not inside or key != period.key)
+    if boundary and period.complete and enabled
+        f_addOrUpgradeLevel(state, period.hi, true, code, period.hiTime,
+            period.hiHour, period.hiHour, b.t, false)
+        f_addOrUpgradeLevel(state, period.lo, false, code, period.loTime,
+            period.loHour, period.loHour, b.t, false)
+    if inside
+        if not period.running or boundary
+            // Eine beim Datenbeginn nur teilweise vorhandene Periode nicht
+            // als vollständige Session / vollständigen Tag ausgeben.
+            period.complete := not na(state.processed)
+            period.key := key
+            period.hi := b.h
+            period.lo := b.l
+            period.hiTime := b.t
+            period.loTime := b.t
+            period.hiHour := b.hourStart
+            period.loHour := b.hourStart
         else
-
-            pendingWeekHigh := weekHigh
-
-
-        if weekLowIsSwing
-
-            f_addOrUpgradeLevel(
-                 weekLow,
-                 false,
-                 "PWL",
-                 colWeek,
-                 5,
-                 weekLowSwingTime)
-
-            pendingWeekLow := na
-
-        else
-
-            pendingWeekLow := weekLow
-
-
-    weekHigh := high
-    weekLow := low
-
-    weekHighIsSwing := false
-    weekLowIsSwing := false
-
-    weekHighSwingTime := na
-    weekLowSwingTime := na
-
-
-else
-
-    if high > weekHigh
-        weekHigh := high
-        weekHighIsSwing := false
-        weekHighSwingTime := na
-
-    if low < weekLow
-        weekLow := low
-        weekLowIsSwing := false
-        weekLowSwingTime := na
-
-
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 11. NEUES H1 SWING HIGH VERARBEITEN
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-if newH1SwingHigh
-
-    // Normaler / spitzer Swing
-    if showSwings
-
-        if showSharp and h1SharpHigh
-
-            f_addOrUpgradeLevel(
-                 h1SwingHighPrice,
-                 true,
-                 "SPITZ H",
-                 colSharp,
-                 2,
-                 h1SwingHighTime)
-
-        else
-
-            f_addOrUpgradeLevel(
-                 h1SwingHighPrice,
-                 true,
-                 "Swing H",
-                 colSwing,
-                 1,
-                 h1SwingHighTime)
-
-
-    // London aktuell
-    if inSession1 and
-       f_samePrice(
-           h1SwingHighPrice,
-           session1High)
-
-        session1HighIsSwing := true
-        session1HighSwingTime := h1SwingHighTime
-
-
-    // London bereits beendet
-    if showSessions and
-       showSession1 and
-       f_samePrice(
-           h1SwingHighPrice,
-           pendingS1High)
-
-        f_addOrUpgradeLevel(
-             pendingS1High,
-             true,
-             "London H",
-             colSession,
-             3,
-             pendingS1HighTime)
-
-        pendingS1High := na
-        pendingS1HighTime := na
-
-
-    // NY AM aktuell
-    if inSession2 and
-       f_samePrice(
-           h1SwingHighPrice,
-           session2High)
-
-        session2HighIsSwing := true
-        session2HighSwingTime := h1SwingHighTime
-
-
-    // NY PM aktuell
-    if inSession3 and
-       f_samePrice(
-           h1SwingHighPrice,
-           session3High)
-
-        session3HighIsSwing := true
-        session3HighSwingTime := h1SwingHighTime
-
-
-    // NY PM beendet
-    if showSessions and
-       showSession3 and
-       f_samePrice(
-           h1SwingHighPrice,
-           pendingS3High)
-
-        f_addOrUpgradeLevel(
-             pendingS3High,
-             true,
-             "NY PM H",
-             colSession,
-             3,
-             h1SwingHighTime)
-
-        pendingS3High := na
-
-
-    // aktueller Tag
-    if f_samePrice(
-         h1SwingHighPrice,
-         dayHigh)
-
-        dayHighIsSwing := true
-        dayHighSwingTime := h1SwingHighTime
-
-
-    // abgeschlossener Vortag
-    if showPD and
-       f_samePrice(
-           h1SwingHighPrice,
-           pendingDayHigh)
-
-        f_addOrUpgradeLevel(
-             pendingDayHigh,
-             true,
-             "PDH",
-             colDay,
-             4,
-             h1SwingHighTime)
-
-        pendingDayHigh := na
-
-
-    // aktuelle Woche
-    if f_samePrice(
-         h1SwingHighPrice,
-         weekHigh)
-
-        weekHighIsSwing := true
-        weekHighSwingTime := h1SwingHighTime
-
-
-    // abgeschlossene Vorwoche
-    if showPW and
-       f_samePrice(
-           h1SwingHighPrice,
-           pendingWeekHigh)
-
-        f_addOrUpgradeLevel(
-             pendingWeekHigh,
-             true,
-             "PWH",
-             colWeek,
-             5,
-             h1SwingHighTime)
-
-        pendingWeekHigh := na
-
-
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 12. NEUES H1 SWING LOW VERARBEITEN
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-if newH1SwingLow
-
-    if showSwings
-
-        if showSharp and h1SharpLow
-
-            f_addOrUpgradeLevel(
-                 h1SwingLowPrice,
-                 false,
-                 "SPITZ L",
-                 colSharp,
-                 2,
-                 h1SwingLowTime)
-
-        else
-
-            f_addOrUpgradeLevel(
-                 h1SwingLowPrice,
-                 false,
-                 "Swing L",
-                 colSwing,
-                 1,
-                 h1SwingLowTime)
-
-
-    // London aktuell
-    if inSession1 and
-       f_samePrice(
-           h1SwingLowPrice,
-           session1Low)
-
-        session1LowIsSwing := true
-        session1LowSwingTime := h1SwingLowTime
-
-
-    // London beendet
-    if showSessions and
-       showSession1 and
-       f_samePrice(
-           h1SwingLowPrice,
-           pendingS1Low)
-
-        f_addOrUpgradeLevel(
-             pendingS1Low,
-             false,
-             "London L",
-             colSession,
-             3,
-             pendingS1LowTime)
-
-        pendingS1Low := na
-        pendingS1LowTime := na
-
-
-    // NY AM aktuell
-    if inSession2 and
-       f_samePrice(
-           h1SwingLowPrice,
-           session2Low)
-
-        session2LowIsSwing := true
-        session2LowSwingTime := h1SwingLowTime
-
-
-    // NY PM aktuell
-    if inSession3 and
-       f_samePrice(
-           h1SwingLowPrice,
-           session3Low)
-
-        session3LowIsSwing := true
-        session3LowSwingTime := h1SwingLowTime
-
-
-    // NY PM beendet
-    if showSessions and
-       showSession3 and
-       f_samePrice(
-           h1SwingLowPrice,
-           pendingS3Low)
-
-        f_addOrUpgradeLevel(
-             pendingS3Low,
-             false,
-             "NY PM L",
-             colSession,
-             3,
-             h1SwingLowTime)
-
-        pendingS3Low := na
-
-
-    // aktueller Tag
-    if f_samePrice(
-         h1SwingLowPrice,
-         dayLow)
-
-        dayLowIsSwing := true
-        dayLowSwingTime := h1SwingLowTime
-
-
-    // Vortag
-    if showPD and
-       f_samePrice(
-           h1SwingLowPrice,
-           pendingDayLow)
-
-        f_addOrUpgradeLevel(
-             pendingDayLow,
-             false,
-             "PDL",
-             colDay,
-             4,
-             h1SwingLowTime)
-
-        pendingDayLow := na
-
-
-    // aktuelle Woche
-    if f_samePrice(
-         h1SwingLowPrice,
-         weekLow)
-
-        weekLowIsSwing := true
-        weekLowSwingTime := h1SwingLowTime
-
-
-    // Vorwoche
-    if showPW and
-       f_samePrice(
-           h1SwingLowPrice,
-           pendingWeekLow)
-
-        f_addOrUpgradeLevel(
-             pendingWeekLow,
-             false,
-             "PWL",
-             colWeek,
-             5,
-             h1SwingLowTime)
-
-        pendingWeekLow := na
-
-//────────────────────────────────────────
-// 3M: FEHLENDEN LETZTEN H1-RISS SPIEGELN
-//────────────────────────────────────────
-
-var line h1MirrorLastLine = na
-var label h1MirrorLastLabel = na
-
-bool useH1MirrorLast =
-     timeframe.in_seconds() <= 3600 and
-     not na(h1MirrorLastPrice) and
-     not na(h1MirrorLastStart) and
-     not na(h1MirrorLastSweep)
-
-
-
-//────────────────────────────────────────
-// SICHTBARE LEVEL NACH MARKTNÄHE
-//────────────────────────────────────────
-
-array<int> nearestHighIdx = array.new_int()
-array<float> nearestHighDist = array.new_float()
-
-array<int> nearestLowIdx = array.new_int()
-array<float> nearestLowDist = array.new_float()
-
-if array.size(levelPrice) > 0
-
-    for j = 0 to array.size(levelPrice) - 1
-
-        if array.get(levelActive, j)
-
-            float candidatePrice = array.get(levelPrice, j)
-
-            bool candidateIsHigh = array.get(levelHigh, j)
-
-            if candidateIsHigh and candidatePrice > close
-
-                float distance = candidatePrice - close
-
-                f_keepNearest(
-                    nearestHighIdx,
-                    nearestHighDist,
-                    j,
-                    distance,
-                    visiblePerSide)
-
-            if not candidateIsHigh and candidatePrice < close
-
-                float distance = close - candidatePrice
-
-                f_keepNearest(
-                    nearestLowIdx,
-                    nearestLowDist,
-                    j,
-                    distance,
-                    visiblePerSide)
-
-
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 13. AKTIVE LEVEL + SWEEPS
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-if array.size(levelPrice) > 0
-
-    for i = 0 to array.size(levelPrice) - 1
-
-        if array.get(levelActive, i)
-
-            float price =
-                 array.get(levelPrice, i)
-
-            bool isHigh =
-                 array.get(levelHigh, i)
-
-            string source =
-                 array.get(levelSource, i)
-
-            line ln =
-                 array.get(levelLine, i)
-
-            label lbl =
-                 array.get(levelLabel, i)
-
-            bool isVisible = isHigh ? array.includes(nearestHighIdx, i) : array.includes(nearestLowIdx, i)
-
-            color originalColor = colWeek
-
-            if array.get(levelPriority, i) == 1
-                originalColor := colSwing
-            else if array.get(levelPriority, i) == 2
-                originalColor := colSharp
-            else if array.get(levelPriority, i) == 3
-                originalColor := colSession
-            else if array.get(levelPriority, i) == 4
-                originalColor := colDay
-
-            if isVisible
-                line.set_color(ln, originalColor)
-                label.set_text(lbl, source)
-                label.set_textcolor(lbl, originalColor)
+            if b.h > period.hi
+                period.hi := b.h
+                period.hiTime := b.t
+                period.hiHour := b.hourStart
+            if b.l < period.lo
+                period.lo := b.l
+                period.loTime := b.t
+                period.loHour := b.hourStart
+    period.running := inside
+    true
+
+f_processBar(LiquidityState state, CanonicalBar b) =>
+    if na(state.processed) or b.t > state.processed
+        // Erst H1-Bestätigungen am Bar-Anfang, dann Periodenabschluss,
+        // dann Sweep durch DIESEN 3m-Bar. Kein ganzer H1-Wick als Ersatz.
+        if not na(b.swingH) and (na(state.highSignal) or b.swingHStart != state.highSignal)
+            f_addOrUpgradeLevel(state, b.swingH, true, showSharp and b.sharpH ? 2 : 1,
+                b.swingHStart, b.swingHStart, b.swingLastOrigin, b.t, true)
+            state.highSignal := b.swingHStart
+        if not na(b.swingL) and (na(state.lowSignal) or b.swingLStart != state.lowSignal)
+            f_addOrUpgradeLevel(state, b.swingL, false, showSharp and b.sharpL ? 2 : 1,
+                b.swingLStart, b.swingLStart, b.swingLastOrigin, b.t, true)
+            state.lowSignal := b.swingLStart
+
+        f_updatePeriod(state, 0, b.s0, b.s0Key, showSessions and showSession0, 10, b)
+        f_updatePeriod(state, 1, b.s1, b.s1Key, showSessions and showSession1, 11, b)
+        f_updatePeriod(state, 2, b.s2, b.s2Key, showSessions and showSession2, 12, b)
+        f_updatePeriod(state, 3, b.s3, b.s3Key, showSessions and showSession3, 13, b)
+        f_updatePeriod(state, 4, true, b.dayKey, showPD, 20, b)
+        f_updatePeriod(state, 5, true, b.weekKey, showPW, 30, b)
+        if state.mergeNeeded
+            f_mergeOpenLevels(state)
+
+        if array.size(state.levels) > 0
+            for level in state.levels
+                // Levels entstehen am Bar-Anfang. Bereits der erste Bar
+                // nach Sessionende / Bestätigung kann sie reißen.
+                if na(level.sweptAt) and b.t >= level.created
+                    bool broken = (level.isHigh ?
+                        (sweepByWick ? b.h : b.c) >= level.price + syminfo.mintick :
+                        (sweepByWick ? b.l : b.c) <= level.price - syminfo.mintick)
+                    if broken
+                        level.sweptAt := b.t
+                if not na(level.sweptAt) and f_enabled(level)
+                    if f_laterSweep(level, state.lastSwept)
+                        state.lastSwept := level
+
+        // maxLevels begrenzt alte Historie, niemals offene Liquidität.
+        // Pending/Tombstones bis nach dem spätestmöglichen H1-Signal
+        // behalten. Die H1-Barfolge statt Wandzeit benutzen: Handelslücken
+        // und verkürzte H1-Kerzen dürfen keine Tombstones vorzeitig löschen.
+        int i = 0
+        while i < array.size(state.levels)
+            LiquidityLevel level = array.get(state.levels, i)
+            int newestOrigin = array.max(level.origins)
+            bool expired = not na(b.oldestSwingOrigin) and newestOrigin < b.oldestSwingOrigin
+            bool oldSwept = not na(level.sweptAt) and array.size(state.levels) > maxLevels
+            bool unusedPending = not level.confirmedSwing and level.code != 13 and level.code != 20
+            if expired and (oldSwept or unusedPending) and (na(state.lastSwept) or level.id != state.lastSwept.id)
+                array.remove(state.levels, i)
             else
-                line.set_color(ln, color.new(originalColor, 100))
-                label.set_text(lbl, "")
-
-
-            //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // LABEL MITTIG AUF AKTIVER LINIE
-            //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-            int startTime =
-                 line.get_x1(ln)
-
-            int labelTime = math.max(startTime, time - 120 * 60 * 1000)
-
-            label.set_x(
-                lbl,
-                labelTime)
-
-            label.set_y(
-                 lbl,
-                 price)
-
-            label.set_style(
-                 lbl,
-                 label.style_none)
-
-            label.set_size(
-                 lbl,
-                 labelSizeValue)
-
-
-            //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // SWEEP PRÜFEN
-            //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-            bool swept = false
-
-            int createdTime = array.get(levelCreatedTime, i)
-            bool canSweep = time > createdTime
-
-            if canSweep
-                if sweepByWick
-                    if isHigh
-                        swept := high >= price + syminfo.mintick
-                    else
-                        swept := low <= price - syminfo.mintick
-                else
-                    if isHigh
-                        swept := close >= price + syminfo.mintick
-                    else
-                        swept := close <= price - syminfo.mintick
-
-
-            //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // LEVEL GERISSEN
-            //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-            if swept
-
-                array.set(
-                     levelActive,
-                     i,
-                     false)
-
-
-                int priority =
-                     array.get(
-                         levelPriority,
-                         i)
-
-                bool becomesLatest = na(lastSweptSwingTime) or time > lastSweptSwingTime or (time == lastSweptSwingTime and isHigh == lastSweptSwingIsHigh and ((isHigh and price > lastSweptSwingPrice) or (not isHigh and price < lastSweptSwingPrice)))
-
-
-
-                //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                // SWING / SPITZ
-                //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-                if array.get(levelWasSwing, i)
-
-
-                    if showSwept
-
-                        // Linie am tatsächlichen Riss beenden
-                        line.set_x2(
-                            ln,
-                            time)
-
-                        line.set_extend(
-                            ln,
-                            extend.none)
-
-
-                        int sweptLabelTime = time - int(timeframe.in_seconds() * 1000 * 5)
-
-
-                        label.set_x(
-                            lbl,
-                            sweptLabelTime)
-
-                        label.set_y(
-                            lbl,
-                            price)
-
-                        label.set_style(
-                            lbl,
-                            label.style_none)
-
-                        label.set_text(
-                            lbl,
-                            source + " ✓")
-
-
-                        //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                        // DIESER RISS IST DER NEUE LETZTE
-                        //
-                        
-
-                        if becomesLatest
-
-                            // bisherigen letzten Riss grau machen
-                            if not na(lastSweptSwingLine) and lastSweptSwingLine != ln
-
-                                line.set_style(
-                                    lastSweptSwingLine,
-                                    line.style_dashed)
-
-                                line.set_color(
-                                    lastSweptSwingLine,
-                                    colSwept)
-
-                                if not na(lastSweptSwingLabel)
-
-                                    label.set_textcolor(
-                                        lastSweptSwingLabel,
-                                        colSwept)
-
-
-                            // aktuellen Riss farbig + durchgezogen lassen
-                            line.set_style(
-                                ln,
-                                line.style_solid)
-
-
-                            lastSweptSwingLine := ln
-                            lastSweptSwingLabel := lbl
-                            lastSweptSwingTime := time
-                            lastSweptSwingPrice := price
-                            lastSweptSwingIsHigh := isHigh
-
-                        else
-                            line.set_style(ln, line.style_dashed)
-                            line.set_color(ln, colSwept)
-                            label.set_textcolor(lbl, colSwept)
-
-
-                    else
-                        if becomesLatest
-
-                            if not na(lastSweptSwingLine) and lastSweptSwingLine != ln
-                                line.delete(lastSweptSwingLine)
-                                label.delete(lastSweptSwingLabel)
-
-                            line.set_x2(ln, time)
-                            line.set_extend(ln, extend.none)
-                            line.set_style(ln, line.style_solid)
-
-                            int lastStart = line.get_x1(ln)
-                            int lastMiddle = int(math.round((lastStart + time) / 2.0))
-
-                            label.set_x(lbl, lastMiddle)
-                            label.set_y(lbl, price)
-                            label.set_style(lbl, label.style_none)
-                            label.set_text(lbl, source + " ✓")
-
-                            lastSweptSwingLine := ln
-                            lastSweptSwingLabel := lbl
-                            lastSweptSwingTime := time
-                            lastSweptSwingPrice := price
-                            lastSweptSwingIsHigh := isHigh
-
-                        else
-                            line.delete(ln)
-                            label.delete(lbl)
-
-                //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                // SESSION / DAY / WEEK
-                //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-                else
-
-                    if showSwept
-
-                        line.set_x2(
-                             ln,
-                             time)
-
-                        line.set_extend(
-                             ln,
-                             extend.none)
-
-                        line.set_style(
-                             ln,
-                             line.style_dashed)
-
-                        line.set_color(
-                             ln,
-                             colSwept)
-
-
-                        int sweptLabelTime = time - int(timeframe.in_seconds() * 1000 * 5)
-
-                        label.set_x(
-                            lbl,
-                            sweptLabelTime)
-
-                        label.set_y(
-                             lbl,
-                             price)
-
-                        label.set_style(
-                             lbl,
-                             label.style_none)
-
-                        label.set_text(
-                             lbl,
-                             source + " ✓")
-
-                        label.set_textcolor(
-                             lbl,
-                             colSwept)
-
-
-                    else
-
-                        if becomesLatest
-
-                            // bisherigen letzten Riss löschen
-                            if not na(lastSweptSwingLine) and lastSweptSwingLine != ln
-                                line.delete(lastSweptSwingLine)
-
-                                if not na(lastSweptSwingLabel)
-                                    label.delete(lastSweptSwingLabel)
-
-                            // neuen letzten Riss behalten
-                            line.set_x2(ln, time)
-                            line.set_extend(ln, extend.none)
-                            line.set_style(ln, line.style_solid)
-
-                            int lastStart = line.get_x1(ln)
-                            int lastMiddle = int(math.round((lastStart + time) / 2.0))
-
-                            label.set_x(lbl, lastMiddle)
-                            label.set_y(lbl, price)
-                            label.set_style(lbl, label.style_none)
-                            label.set_text(lbl, source + " ✓")
-
-                            lastSweptSwingLine := ln
-                            lastSweptSwingLabel := lbl
-                            lastSweptSwingTime := time
-                            lastSweptSwingPrice := price
-                            lastSweptSwingIsHigh := isHigh
-
-                        else
-
-                            line.delete(ln)
-                            label.delete(lbl)
-
-                        
-
-if array.size(levelPrice) > 0
-    for i = 0 to array.size(levelPrice) - 1
-        if not array.get(levelActive, i)
-
-            label sweptLbl = array.get(levelLabel, i)
-
-            if not na(sweptLbl)
-                int sweptFollowTime = time - 120 * 60 * 1000
-                label.set_x(sweptLbl, sweptFollowTime)
+                i += 1
+        state.processed := b.t
+    true
+
+var LiquidityState liquidity = LiquidityState.new(array.new<LiquidityLevel>(), array.new<LiquidityPeriod>())
+if barstate.isfirst
+    for i = 0 to 5
+        array.push(liquidity.periods, LiquidityPeriod.new())
+
+// request.security_lower_tf liefert ausschließlich Rohdaten/Bestätigungen.
+// Die zustandsbehaftete Funktion wird NICHT in einem request ausgewertet.
+// Auf H1 werden dieselben 3m-Bars explizit aufsteigend durchlaufen.
+// Keine varip-Zustände: Realtime-Rollback setzt den Zustand auf den Beginn
+// der Chartkerze zurück; alle verfügbaren geschlossenen Intrabars werden
+// bei jedem Update erneut abgespielt. Das ist auch nach Reload identisch.
+float chartSeconds = timeframe.in_seconds()
+if na(chartSeconds) or chartSeconds < 180 or chartSeconds % 180 != 0
+    runtime.error("Liquidity Map Pro benötigt einen zeitbasierten Chart ab 3 Minuten, dessen Intervall durch 3 Minuten teilbar ist.")
+
+if chartSeconds == 180
+    CanonicalBar currentBar = f_canonicalBar()
+    if barstate.isconfirmed
+        f_processBar(liquidity, currentBar)
+else
+    array<CanonicalBar> intrabars = request.security_lower_tf(
+        syminfo.tickerid, "3", f_canonicalBar(), calc_bars_count=100000)
+    for b in intrabars
+        if b.endTime <= timenow
+            f_processBar(liquidity, b)
+
+if barstate.islast and na(liquidity.processed)
+    runtime.error("Keine abgeschlossenen 3m-Daten verfügbar. Symbol, Charttyp und Intrabar-Historie prüfen.")
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DARSTELLUNG: liest nur den gemeinsamen Zustand, erzeugt keine Levels
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var array<line> drawnLines = array.new<line>()
+var array<label> drawnLabels = array.new<label>()
+
+f_drawLevel(LiquidityLevel level, int asOf, bool latest) =>
+    bool active = na(level.sweptAt)
+    color base = f_mirrorColor(level.code)
+    color tint = active or latest ? base : colSwept
+    int endTime = active ? asOf : level.sweptAt
+    line ln = line.new(level.start, level.price, endTime, level.price,
+        xloc=xloc.bar_time, extend=active ? extend.right : extend.none,
+        color=tint, style=active or latest ? line.style_solid : line.style_dashed,
+        width=f_mirrorPriority(level.code) >= 4 ? 2 : 1)
+    int labelTime = (latest ? level.start + int(math.round((endTime - level.start) * 0.99)) :
+        active ? math.max(level.start, asOf - 120 * 60 * 1000) : asOf - 120 * 60 * 1000)
+    label lbl = label.new(labelTime, level.price,
+        f_mirrorSourceText(level.code, level.isHigh) + (active ? "" : " ✓"),
+        xloc=xloc.bar_time, style=label.style_none,
+        textcolor=tint, color=color.new(color.black, 100), size=labelSizeValue)
+    array.push(drawnLines, ln)
+    array.push(drawnLabels, lbl)
+    true
 
 if barstate.islast
+    for ln in drawnLines
+        line.delete(ln)
+    for lbl in drawnLabels
+        label.delete(lbl)
+    array.clear(drawnLines)
+    array.clear(drawnLabels)
 
-    // lokalen 3m/1h-Riss nur optisch ausblenden
-    if not na(lastSweptSwingLine)
-        line.set_color(lastSweptSwingLine, color.new(colSwept, 100))
+    array<int> nearestHighIdx = array.new_int()
+    array<float> nearestHighDist = array.new_float()
+    array<int> nearestLowIdx = array.new_int()
+    array<float> nearestLowDist = array.new_float()
+    if array.size(liquidity.levels) > 0
+        for i = 0 to array.size(liquidity.levels) - 1
+            LiquidityLevel level = array.get(liquidity.levels, i)
+            if f_enabled(level) and na(level.sweptAt)
+                if level.isHigh and level.price > close
+                    f_keepNearest(nearestHighIdx, nearestHighDist, i, level.price - close, visiblePerSide)
+                if not level.isHigh and level.price < close
+                    f_keepNearest(nearestLowIdx, nearestLowDist, i, close - level.price, visiblePerSide)
 
-    if not na(lastSweptSwingLabel)
-        label.set_text(lastSweptSwingLabel, "")
-
-if barstate.islast
-    if not na(h1MirrorLastLine)
-        line.delete(h1MirrorLastLine)
-        h1MirrorLastLine := na
-
-    if not na(h1MirrorLastLabel)
-        label.delete(h1MirrorLastLabel)
-        h1MirrorLastLabel := na
-
-    if useH1MirrorLast
-        color mirrorColor = f_mirrorColor(h1MirrorLastCode)
-        int mirrorWidth = f_mirrorPriority(h1MirrorLastCode) >= 4 ? 2 : 1
-        // h1MirrorLastSweep stammt jetzt bereits aus dem kanonischen 3m-Engine.
-        // Deshalb ist keine chartabhängige Rückwärtssuche mehr nötig.
-        int mirrorEndTime = h1MirrorLastSweep
-
-        h1MirrorLastLine := line.new(
-            h1MirrorLastStart,
-            h1MirrorLastPrice,
-            mirrorEndTime,
-            h1MirrorLastPrice,
-            xloc=xloc.bar_time,
-            extend=extend.none,
-            color=mirrorColor,
-            style=line.style_solid,
-            width=mirrorWidth)
-
-        int mirrorLabelTime = h1MirrorLastStart + int(math.round((mirrorEndTime - h1MirrorLastStart) * 0.99))
-
-        h1MirrorLastLabel := label.new(
-            mirrorLabelTime,
-            h1MirrorLastPrice,
-            f_mirrorSourceText(h1MirrorLastCode, h1MirrorLastIsHigh) + " ✓",
-            xloc=xloc.bar_time,
-            style=label.style_none,
-            textcolor=mirrorColor,
-            size=labelSizeValue)
+    if not na(liquidity.processed)
+        for i in nearestHighIdx
+            f_drawLevel(array.get(liquidity.levels, i), liquidity.processed, false)
+        for i in nearestLowIdx
+            f_drawLevel(array.get(liquidity.levels, i), liquidity.processed, false)
+        // Letzten Riss separat zeichnen, damit History-Limit und showSwept
+        // seine Sichtbarkeit nicht beeinflussen.
+        if not na(liquidity.lastSwept)
+            f_drawLevel(liquidity.lastSwept, liquidity.processed, true)
+        int remaining = math.max(0, maxLevels - array.size(drawnLines))
+        int i = array.size(liquidity.levels) - 1
+        while showSwept and remaining > 0 and i >= 0
+            LiquidityLevel level = array.get(liquidity.levels, i)
+            if not na(level.sweptAt) and f_enabled(level) and (na(liquidity.lastSwept) or level.id != liquidity.lastSwept.id)
+                f_drawLevel(level, liquidity.processed, false)
+                remaining -= 1
+            i -= 1
