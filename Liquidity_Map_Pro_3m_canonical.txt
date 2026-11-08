@@ -1,6 +1,6 @@
 //@version=6
 indicator(
-     "Liquidity Map Pro v1.02",
+     "Liquidity Map Pro v1.03",
      overlay=true,
      dynamic_requests=true,
      max_lines_count=500,
@@ -737,6 +737,8 @@ f_drawLevel(LiquidityLevel level, int asOf, bool latest) =>
         color=tint, style=active or latest ? line.style_solid : line.style_dashed,
         width=f_mirrorPriority(level.code) >= 4 ? 2 : 1)
     int labelTime = active ? math.max(level.start, asOf - 120 * 60 * 1000) : math.max(drawStart + int(math.round((drawEnd - drawStart) * 0.65)), drawEnd - 2 * 60 * 60 * 1000)
+    if not active and (((level.code == 1 or level.code == 10) and level.isHigh) or (level.code == 12 and not level.isHigh))
+        labelTime := math.max(drawStart, math.min(labelTime, drawEnd - 20 * 60 * 1000))
     label lbl = label.new(labelTime, level.price,
         f_mirrorSourceText(level.code, level.isHigh) + (active ? "" : " ✓"),
         xloc=xloc.bar_time, style=label.style_none,
