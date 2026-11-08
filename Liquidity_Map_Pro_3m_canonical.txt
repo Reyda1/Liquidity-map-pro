@@ -1,6 +1,6 @@
 //@version=6
 indicator(
-     "Liquidity Map Pro v1.06",
+     "Liquidity Map Pro v1.07",
      overlay=true,
      dynamic_requests=true,
      max_lines_count=500,
@@ -712,16 +712,45 @@ float chartSeconds = timeframe.in_seconds()
 if na(chartSeconds) or chartSeconds < 180 or chartSeconds % 180 != 0
     runtime.error("Liquidity Map Pro benötigt einen zeitbasierten Chart ab 3 Minuten, dessen Intervall durch 3 Minuten teilbar ist.")
 
+// Reine Zeichenhilfe aus denselben abgeschlossenen 3m-Bars; kein Level-Zustand.
+type SwingDrawExtremes
+    float hi
+    float lo
+    int hiTime
+    int loTime
+    bool complete
+
+var map<int, SwingDrawExtremes> swingDrawExtremes = map.new<int, SwingDrawExtremes>()
+
+f_recordSwingDrawExtremes(CanonicalBar b) =>
+    if chartSeconds < 3600
+        if not map.contains(swingDrawExtremes, b.hourStart)
+            // Die erste geladene H1 kann nur teilweise vorhanden sein.
+            bool complete = b.t == b.hourStart or map.size(swingDrawExtremes) > 0
+            map.put(swingDrawExtremes, b.hourStart, SwingDrawExtremes.new(b.h, b.l, b.t, b.t, complete))
+        else
+            SwingDrawExtremes extremes = map.get(swingDrawExtremes, b.hourStart)
+            // Bei gleichen Extremen bleibt die erste 3m-Kerze der Ursprung.
+            if b.h > extremes.hi
+                extremes.hi := b.h
+                extremes.hiTime := b.t
+            if b.l < extremes.lo
+                extremes.lo := b.l
+                extremes.loTime := b.t
+    true
+
 if chartSeconds == 180
     CanonicalBar currentBar = f_canonicalBar()
     if barstate.isconfirmed
         f_processBar(liquidity, currentBar)
+        f_recordSwingDrawExtremes(currentBar)
 else
     array<CanonicalBar> intrabars = request.security_lower_tf(
         syminfo.tickerid, "3", f_canonicalBar(), calc_bars_count=100000)
     for b in intrabars
         if b.endTime <= timenow
             f_processBar(liquidity, b)
+            f_recordSwingDrawExtremes(b)
 
 if barstate.islast and na(liquidity.processed)
     runtime.error("Keine abgeschlossenen 3m-Daten verfügbar. Symbol, Charttyp und Intrabar-Historie prüfen.")
@@ -765,6 +794,10 @@ f_drawLevel(LiquidityLevel level, int asOf, bool latest) =>
     int endTime = active ? asOf : level.sweptAt
     int drawStart = level.start
     int drawEnd = f_h1DrawTime(endTime)
+    if chartSeconds < 3600 and (level.code == 1 or level.code == 2) and map.contains(swingDrawExtremes, level.start)
+        SwingDrawExtremes extremes = map.get(swingDrawExtremes, level.start)
+        if extremes.complete and f_samePrice(level.price, level.isHigh ? extremes.hi : extremes.lo)
+            drawStart := level.isHigh ? extremes.hiTime : extremes.loTime
     if chartSeconds == 3600
         // origins enthält auch nach Upgrades die H1-Ursprünge aller Quellen.
         // Der zum exakten Start gehörende Ursprung kann vor der Charthistorie liegen.
