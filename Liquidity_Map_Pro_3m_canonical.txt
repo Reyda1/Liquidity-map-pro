@@ -1,6 +1,6 @@
 //@version=6
 indicator(
-     "Liquidity Map Pro v1.05",
+     "Liquidity Map Pro v1.06",
      overlay=true,
      dynamic_requests=true,
      max_lines_count=500,
@@ -478,6 +478,10 @@ f_startOrigin(LiquidityLevel level) =>
             result := origin
     result
 
+f_confirmedOrigin(LiquidityLevel level) =>
+    int origin = f_startOrigin(level)
+    level.confirmedSwing and not na(origin) and array.includes(level.swingOrigins, origin)
+
 // Einziger Schreibpfad für Swing-, Session-, Tages- und Wochen-Level.
 // sweptAt wird hier NIE zurückgesetzt, auch nicht bei einer H1-Bestätigung.
 f_addOrUpgradeLevel(
@@ -488,12 +492,12 @@ f_addOrUpgradeLevel(
     if not na(price) and not na(startTime) and not na(origin)
         state.mergeNeeded := true
         if confirmedSwing
-            // Auch bereits gerissene PM-Kandidaten bestätigen, selbst wenn
+            // Auch bereits gerissene Kandidaten bestätigen, selbst wenn
             // eine ältere gleichpreisige Quelle beim folgenden Lookup gewinnt.
             for candidate in state.levels
-                if candidate.code == 13 and not candidate.confirmedSwing and candidate.isHigh == isHigh and f_samePrice(candidate.price, price)
-                    int pmOrigin = f_startOrigin(candidate)
-                    if not na(pmOrigin) and pmOrigin >= origin and pmOrigin <= lastOrigin
+                if not f_confirmedOrigin(candidate) and candidate.isHigh == isHigh and f_samePrice(candidate.price, price)
+                    int candidateOrigin = f_startOrigin(candidate)
+                    if not na(candidateOrigin) and candidateOrigin >= origin and candidateOrigin <= lastOrigin
                         candidate.confirmedSwing := true
                         for swingOrigin in array.from(origin, lastOrigin)
                             if not array.includes(candidate.swingOrigins, swingOrigin)
@@ -502,12 +506,11 @@ f_addOrUpgradeLevel(
             for i = 0 to array.size(state.levels) - 1
                 LiquidityLevel level = array.get(state.levels, i)
                 if level.isHigh == isHigh and f_samePrice(level.price, price)
-                    bool canReuse = (code != 13 or not level.confirmedSwing or array.includes(level.swingOrigins, origin))
-                    canReuse := canReuse and (level.code != 13 or level.confirmedSwing or code == 13 or confirmedSwing)
+                    bool canReuse = confirmedSwing or not level.confirmedSwing or array.includes(level.swingOrigins, origin)
                     if f_hasOrigin(level, origin, lastOrigin) and canReuse
                         existing := i
                         break
-                    if na(level.sweptAt) and level.confirmedSwing and code != 13
+                    if na(level.sweptAt) and f_confirmedOrigin(level) and confirmedSwing
                         activeAtPrice := i
         // Ein gerissener gleicher Preis mit ANDEREM Ursprung ist kein
         // Verbot für ein tatsächlich neues Level an einem späteren Tag.
@@ -547,7 +550,7 @@ f_mergeOpenLevels(LiquidityState state) =>
     // für jeden Intrabar. Map-Werte sind Referenzen auf dieselben Levels.
     map<int, LiquidityLevel> openByPrice = map.new<int, LiquidityLevel>()
     for level in state.levels
-        if na(level.sweptAt) and level.confirmedSwing
+        if na(level.sweptAt) and f_confirmedOrigin(level)
             int key = f_priceKey(level)
             if not map.contains(openByPrice, key)
                 map.put(openByPrice, key, level)
@@ -565,10 +568,10 @@ f_mergeOpenLevels(LiquidityState state) =>
         bool removed = false
         if na(other.sweptAt) and map.contains(openByPrice, key)
             LiquidityLevel target = map.get(openByPrice, key)
-            bool canMerge = other.code != 13 or other.confirmedSwing
+            bool canMerge = f_confirmedOrigin(other)
             if not canMerge
-                int pmOrigin = f_startOrigin(other)
-                canMerge := not na(pmOrigin) and array.includes(target.swingOrigins, pmOrigin)
+                int otherOrigin = f_startOrigin(other)
+                canMerge := not na(otherOrigin) and array.includes(target.swingOrigins, otherOrigin)
             if target.id != other.id and canMerge
                 target.created := math.min(target.created, other.created)
                 for stamp in other.origins
@@ -585,8 +588,8 @@ f_mergeOpenLevels(LiquidityState state) =>
     true
 
 f_enabled(LiquidityLevel level) =>
-    // Nur PD bleibt auch ohne bestätigten H1-Swing gültig.
-    (level.confirmedSwing or level.code == 20) and (level.code >= 10 or showSwings)
+    // Für jede Quelle gilt dieselbe H1-Bestätigung am eigenen Ursprung.
+    f_confirmedOrigin(level) and (level.code >= 10 or showSwings)
 
 // Keine rekonstruierte Reihenfolge innerhalb eines 3m-OHLC-Bars erfinden.
 // Gleichzeitige Risse: High vor Low, außen vor innen, dann Priorität und
@@ -686,7 +689,7 @@ f_processBar(LiquidityState state, CanonicalBar b) =>
             int newestOrigin = array.max(level.origins)
             bool expired = not na(b.oldestSwingOrigin) and newestOrigin < b.oldestSwingOrigin
             bool oldSwept = not na(level.sweptAt) and array.size(state.levels) > maxLevels
-            bool unusedPending = not level.confirmedSwing and level.code != 20
+            bool unusedPending = not f_confirmedOrigin(level)
             if expired and (oldSwept or unusedPending) and (na(state.lastSwept) or level.id != state.lastSwept.id)
                 array.remove(state.levels, i)
             else
