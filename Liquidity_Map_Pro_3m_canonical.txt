@@ -736,7 +736,7 @@ f_drawLevel(LiquidityLevel level, int asOf, bool latest) =>
         xloc=xloc.bar_time, extend=active ? extend.right : extend.none,
         color=tint, style=active or latest ? line.style_solid : line.style_dashed,
         width=f_mirrorPriority(level.code) >= 4 ? 2 : 1)
-    int labelTime = active ? math.max(level.start, asOf - 120 * 60 * 1000) : drawEnd
+    int labelTime = active ? math.max(level.start, asOf - 120 * 60 * 1000) : drawStart + int(math.round((drawEnd - drawStart) * 0.7))
     label lbl = label.new(labelTime, level.price,
         f_mirrorSourceText(level.code, level.isHigh) + (active ? "" : " ✓"),
         xloc=xloc.bar_time, style=label.style_none,
