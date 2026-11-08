@@ -1,6 +1,6 @@
 //@version=6
 indicator(
-     "Liquidity Map Pro v1.04",
+     "Liquidity Map Pro v1.05",
      overlay=true,
      dynamic_requests=true,
      max_lines_count=500,
@@ -439,6 +439,8 @@ type LiquidityLevel
     // Preis allein ist keine Identität. Mehrere aktive Quellen dürfen
     // zusammenfallen; ihre H1-Ursprünge bleiben für spätere Upgrades erhalten.
     array<int> origins
+    // Nur tatsächlich bestätigte H1-Ursprünge, ohne unbestätigte Preis-Aliase.
+    array<int> swingOrigins
 
 type LiquidityPeriod
     bool running = false
@@ -469,6 +471,13 @@ f_hasOrigin(LiquidityLevel level, int origin, int lastOrigin) =>
             break
     found
 
+f_startOrigin(LiquidityLevel level) =>
+    int result = na
+    for origin in level.origins
+        if origin <= level.start and (na(result) or origin > result)
+            result := origin
+    result
+
 // Einziger Schreibpfad für Swing-, Session-, Tages- und Wochen-Level.
 // sweptAt wird hier NIE zurückgesetzt, auch nicht bei einer H1-Bestätigung.
 f_addOrUpgradeLevel(
@@ -478,14 +487,27 @@ f_addOrUpgradeLevel(
     int activeAtPrice = -1
     if not na(price) and not na(startTime) and not na(origin)
         state.mergeNeeded := true
+        if confirmedSwing
+            // Auch bereits gerissene PM-Kandidaten bestätigen, selbst wenn
+            // eine ältere gleichpreisige Quelle beim folgenden Lookup gewinnt.
+            for candidate in state.levels
+                if candidate.code == 13 and not candidate.confirmedSwing and candidate.isHigh == isHigh and f_samePrice(candidate.price, price)
+                    int pmOrigin = f_startOrigin(candidate)
+                    if not na(pmOrigin) and pmOrigin >= origin and pmOrigin <= lastOrigin
+                        candidate.confirmedSwing := true
+                        for swingOrigin in array.from(origin, lastOrigin)
+                            if not array.includes(candidate.swingOrigins, swingOrigin)
+                                array.push(candidate.swingOrigins, swingOrigin)
         if array.size(state.levels) > 0
             for i = 0 to array.size(state.levels) - 1
                 LiquidityLevel level = array.get(state.levels, i)
                 if level.isHigh == isHigh and f_samePrice(level.price, price)
-                    if f_hasOrigin(level, origin, lastOrigin)
+                    bool canReuse = (code != 13 or not level.confirmedSwing or array.includes(level.swingOrigins, origin))
+                    canReuse := canReuse and (level.code != 13 or level.confirmedSwing or code == 13 or confirmedSwing)
+                    if f_hasOrigin(level, origin, lastOrigin) and canReuse
                         existing := i
                         break
-                    if na(level.sweptAt) and level.confirmedSwing
+                    if na(level.sweptAt) and level.confirmedSwing and code != 13
                         activeAtPrice := i
         // Ein gerissener gleicher Preis mit ANDEREM Ursprung ist kein
         // Verbot für ein tatsächlich neues Level an einem späteren Tag.
@@ -494,6 +516,11 @@ f_addOrUpgradeLevel(
         if existing >= 0
             LiquidityLevel level = array.get(state.levels, existing)
             level.confirmedSwing := level.confirmedSwing or confirmedSwing
+            if confirmedSwing
+                if not array.includes(level.swingOrigins, origin)
+                    array.push(level.swingOrigins, origin)
+                if lastOrigin != origin and not array.includes(level.swingOrigins, lastOrigin)
+                    array.push(level.swingOrigins, lastOrigin)
             if not array.includes(level.origins, origin)
                 array.push(level.origins, origin)
             // Bei Doppel-Swings gehört auch die zweite H1 zum Ursprung.
@@ -507,7 +534,8 @@ f_addOrUpgradeLevel(
             if lastOrigin != origin
                 array.push(origins, lastOrigin)
             array.push(state.levels, LiquidityLevel.new(
-                state.nextId, price, isHigh, code, startTime, created, na, confirmedSwing, origins))
+                state.nextId, price, isHigh, code, startTime, created, na, confirmedSwing, origins,
+                confirmedSwing ? array.copy(origins) : array.new_int()))
             state.nextId += 1
     true
 
@@ -523,6 +551,13 @@ f_mergeOpenLevels(LiquidityState state) =>
             int key = f_priceKey(level)
             if not map.contains(openByPrice, key)
                 map.put(openByPrice, key, level)
+            else
+                // Alle echten H1-Bestätigungen vor dem Zusammenführen sammeln,
+                // unabhängig von der Reihenfolge gleichpreisiger Quellen.
+                LiquidityLevel target = map.get(openByPrice, key)
+                for origin in level.swingOrigins
+                    if not array.includes(target.swingOrigins, origin)
+                        array.push(target.swingOrigins, origin)
     int i = 0
     while i < array.size(state.levels)
         LiquidityLevel other = array.get(state.levels, i)
@@ -530,7 +565,11 @@ f_mergeOpenLevels(LiquidityState state) =>
         bool removed = false
         if na(other.sweptAt) and map.contains(openByPrice, key)
             LiquidityLevel target = map.get(openByPrice, key)
-            if target.id != other.id
+            bool canMerge = other.code != 13 or other.confirmedSwing
+            if not canMerge
+                int pmOrigin = f_startOrigin(other)
+                canMerge := not na(pmOrigin) and array.includes(target.swingOrigins, pmOrigin)
+            if target.id != other.id and canMerge
                 target.created := math.min(target.created, other.created)
                 for stamp in other.origins
                     if not array.includes(target.origins, stamp)
@@ -546,9 +585,8 @@ f_mergeOpenLevels(LiquidityState state) =>
     true
 
 f_enabled(LiquidityLevel level) =>
-    // PD und NY PM waren bereits über die früheren H1-Snapshots auch
-    // ohne Swing sichtbar. Diese Quellen bleiben unabhängig davon gültig.
-    (level.confirmedSwing or level.code == 13 or level.code == 20) and (level.code >= 10 or showSwings)
+    // Nur PD bleibt auch ohne bestätigten H1-Swing gültig.
+    (level.confirmedSwing or level.code == 20) and (level.code >= 10 or showSwings)
 
 // Keine rekonstruierte Reihenfolge innerhalb eines 3m-OHLC-Bars erfinden.
 // Gleichzeitige Risse: High vor Low, außen vor innen, dann Priorität und
@@ -648,7 +686,7 @@ f_processBar(LiquidityState state, CanonicalBar b) =>
             int newestOrigin = array.max(level.origins)
             bool expired = not na(b.oldestSwingOrigin) and newestOrigin < b.oldestSwingOrigin
             bool oldSwept = not na(level.sweptAt) and array.size(state.levels) > maxLevels
-            bool unusedPending = not level.confirmedSwing and level.code != 13 and level.code != 20
+            bool unusedPending = not level.confirmedSwing and level.code != 20
             if expired and (oldSwept or unusedPending) and (na(state.lastSwept) or level.id != state.lastSwept.id)
                 array.remove(state.levels, i)
             else
